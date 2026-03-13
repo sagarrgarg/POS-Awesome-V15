@@ -284,6 +284,9 @@ def update_invoice(data):
     # Ensure the document type is set for new invoices to prevent validation errors
     data.setdefault("doctype", doctype)
 
+    if doctype == "Sales Invoice":
+        data.setdefault("update_stock", 1)
+
     if data.get("name"):
         invoice_doc = frappe.get_doc(doctype, data.get("name"))
         invoice_doc.update(data)
@@ -496,6 +499,8 @@ def submit_invoice(invoice, data):
     _apply_item_name_overrides(invoice_doc)
     if invoice.get("posa_delivery_date"):
         invoice_doc.update_stock = 0
+    elif doctype == "Sales Invoice":
+        invoice_doc.update_stock = 1
     mop_cash_list = [
         i.mode_of_payment
         for i in invoice_doc.payments
@@ -907,6 +912,7 @@ def search_invoices_for_return(
 @frappe.whitelist()
 def create_sales_invoice_from_order(sales_order):
     sales_invoice = make_sales_invoice(sales_order, ignore_permissions=True)
+    sales_invoice.update_stock = 1
     sales_invoice.save()
     return sales_invoice
 

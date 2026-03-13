@@ -539,6 +539,7 @@ export default {
 			doc.doctype = "Sales Invoice";
 		}
 		doc.is_pos = 1;
+		doc.update_stock = 1;
 		doc.ignore_pricing_rule = 1;
 		doc.company = doc.company || this.pos_profile.company;
 		doc.pos_profile = doc.pos_profile || this.pos_profile.name;
