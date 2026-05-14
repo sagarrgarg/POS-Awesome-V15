@@ -453,14 +453,16 @@ def update_invoice(data):
             else:
                 tax.included_in_print_rate = 1 if inclusive else 0
 
-    # For return invoices, payments should be negative amounts
+    # For return invoices, payments should be negative amounts.
+    # Reset blank payment rows added by server-side payment refresh to 0
+    # before negating so abs() never receives None.
     if invoice_doc.is_return:
         for payment in invoice_doc.payments:
-            payment.amount = -abs(payment.amount)
-            payment.base_amount = -abs(payment.base_amount)
+            payment.amount = -abs(flt(payment.amount))
+            payment.base_amount = -abs(flt(payment.base_amount))
 
-        invoice_doc.paid_amount = flt(sum(p.amount for p in invoice_doc.payments))
-        invoice_doc.base_paid_amount = flt(sum(p.base_amount for p in invoice_doc.payments))
+        invoice_doc.paid_amount = flt(sum(flt(p.amount) for p in invoice_doc.payments))
+        invoice_doc.base_paid_amount = flt(sum(flt(p.base_amount) for p in invoice_doc.payments))
 
     invoice_doc.flags.ignore_permissions = True
     frappe.flags.ignore_account_permission = True
