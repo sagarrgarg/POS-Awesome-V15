@@ -75,7 +75,11 @@ export default {
 		const delivery_charges = this.flt(this.delivery_charges_rate);
 		sum += delivery_charges;
 
-		const result = this.flt(sum, this.currency_precision);
+		// The arithmetic above runs in positive space so discounts and delivery
+		// charges apply the same way for both directions. Returns take money out,
+		// so the resulting total is negative -- matching Total Qty, the item rows
+		// and the amount that is actually posted.
+		const result = this.flt(this.isReturnInvoice ? -Math.abs(sum) : sum, this.currency_precision);
 		perfMarkEnd("pos:totals-subtotal", mark);
 		return result;
 	},
