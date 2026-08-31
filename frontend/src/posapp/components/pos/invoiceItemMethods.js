@@ -355,28 +355,41 @@ export default {
 			});
 		}
 
+		// Set the customer before touching the items: item preparation talks to the
+		// server and can fail, and losing the customer leaves the field blank while
+		// it is locked for a return -- with no way to fix it from the UI.
+		this.customer = data.customer;
+
 		if (this.items.length > 0) {
-			this.items.forEach((item) => {
-				if (!item.posa_row_id) {
-					item.posa_row_id = this.makeid(20);
-				}
-				if (item.batch_no) {
-					this.set_batch_qty(item, item.batch_no);
-				}
-				if (!item.original_item_name) {
-					item.original_item_name = item.item_name;
-				}
-			});
+			try {
+				this.items.forEach((item) => {
+					if (!item.posa_row_id) {
+						item.posa_row_id = this.makeid(20);
+					}
+					if (item.batch_no) {
+						this.set_batch_qty(item, item.batch_no);
+					}
+					if (!item.original_item_name) {
+						item.original_item_name = item.item_name;
+					}
+				});
 
-			const manualSnapshots = this._snapshotManualValuesFromDocItems(this.items);
+				const manualSnapshots = this._snapshotManualValuesFromDocItems(this.items);
 
-			await this.update_items_details(this.items);
+				await this.update_items_details(this.items);
 
-			if (manualSnapshots.length) {
-				this._restoreManualSnapshots(this.items, manualSnapshots);
+				if (manualSnapshots.length) {
+					this._restoreManualSnapshots(this.items, manualSnapshots);
+				}
+
+				this.posa_offers = data.posa_offers || [];
+			} catch (error) {
+				console.error("Failed to prepare loaded invoice items:", error);
+				this.eventBus.emit("show_message", {
+					title: __("Some item details could not be loaded"),
+					color: "warning",
+				});
 			}
-
-			this.posa_offers = data.posa_offers || [];
 		} else {
 			console.log("Warning: No items in return invoice");
 		}
@@ -390,7 +403,6 @@ export default {
 			});
 		}
 
-		this.customer = data.customer;
 		this.posting_date = this.formatDateForBackend(data.posting_date || frappe.datetime.nowdate());
 		this.discount_amount = data.discount_amount;
 		this.additional_discount_percentage = data.additional_discount_percentage;
@@ -489,6 +501,7 @@ export default {
 			}
 			this.invoice_doc = data;
 			this.items = data.items;
+			this.customer = data.customer;
 			this.update_items_details(this.items);
 			this.posa_offers = data.posa_offers || [];
 			this.items.forEach((item) => {
@@ -499,7 +512,6 @@ export default {
 					this.set_batch_qty(item, item.batch_no);
 				}
 			});
-			this.customer = data.customer;
 			this.posting_date = this.formatDateForBackend(data.posting_date || frappe.datetime.nowdate());
 			this.discount_amount = data.discount_amount;
 			this.additional_discount_percentage = data.additional_discount_percentage;
@@ -733,25 +745,23 @@ export default {
 
 		// Calculate base amounts using the exchange rate
 		const baseCurrency = this.price_list_currency || this.pos_profile.currency;
+		// `total`, `discountAmount` and `grandTotal` already carry the right sign for
+		// returns (they were negated above), so they must not be flipped again here --
+		// doing so turned every base_* amount on a return back into a positive number.
 		if (this.selected_currency !== baseCurrency) {
-			// For returns, we need to ensure negative values
-			const multiplier = isReturn ? -1 : 1;
-
 			// Convert amounts back to the base currency
-			doc.base_total = (total / this.exchange_rate) * multiplier;
-			doc.base_net_total = (total / this.exchange_rate) * multiplier;
-			doc.base_discount_amount = (discountAmount / this.exchange_rate) * multiplier;
-			doc.base_grand_total = (grandTotal / this.exchange_rate) * multiplier;
-			doc.base_rounded_total = (grandTotal / this.exchange_rate) * multiplier;
+			doc.base_total = total / this.exchange_rate;
+			doc.base_net_total = total / this.exchange_rate;
+			doc.base_discount_amount = discountAmount / this.exchange_rate;
+			doc.base_grand_total = grandTotal / this.exchange_rate;
+			doc.base_rounded_total = grandTotal / this.exchange_rate;
 		} else {
-			// Same currency, just ensure negative values for returns
-			const multiplier = isReturn ? -1 : 1;
 			// When in base currency, the base amounts are the same as the regular amounts
-			doc.base_total = total * multiplier;
-			doc.base_net_total = total * multiplier;
-			doc.base_discount_amount = discountAmount * multiplier;
-			doc.base_grand_total = grandTotal * multiplier;
-			doc.base_rounded_total = grandTotal * multiplier;
+			doc.base_total = total;
+			doc.base_net_total = total;
+			doc.base_discount_amount = discountAmount;
+			doc.base_grand_total = grandTotal;
+			doc.base_rounded_total = grandTotal;
 		}
 
 		// Ensure payments have correct base amounts

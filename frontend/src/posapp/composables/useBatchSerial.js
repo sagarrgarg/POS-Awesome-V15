@@ -20,6 +20,12 @@ export function useBatchSerial() {
 	// Set batch number for an item (and update batch data)
 	const setBatchQty = (item, value, update = true, context) => {
 		console.log("Setting batch quantity:", item, value);
+		// Items loaded from an existing invoice (e.g. a return) carry `batch_no`
+		// but not `batch_no_data` -- that is filled in later by update_items_details.
+		// Bail out instead of throwing so the rest of the load flow keeps running.
+		if (!Array.isArray(item.batch_no_data) || !item.batch_no_data.length) {
+			return;
+		}
 		const existing_items = context.items.filter(
 			(element) => element.item_code == item.item_code && element.posa_row_id != item.posa_row_id,
 		);

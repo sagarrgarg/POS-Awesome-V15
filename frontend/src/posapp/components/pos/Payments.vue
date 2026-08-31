@@ -1159,7 +1159,14 @@ export default {
 		// Go back to invoice view and reset customer readonly
 		back_to_invoice() {
 			this.eventBus.emit("show_payment", "false");
-			this.eventBus.emit("set_customer_readonly", false);
+			// Keep the customer locked when going back to a return that references an
+			// invoice -- the return must stay on the original invoice's customer.
+			const lockCustomer = !!(
+				this.invoice_doc &&
+				this.invoice_doc.is_return &&
+				this.invoice_doc.return_against
+			);
+			this.eventBus.emit("set_customer_readonly", lockCustomer);
 			this.$nextTick(() => {
 				this.eventBus.emit("focus_item_search");
 			});
@@ -1598,15 +1605,27 @@ export default {
 		// Set remaining amount for a payment method when focused
 		set_rest_amount(idx) {
 			const isReturn = this.invoice_doc.is_return || this.invoiceType === "Return";
+			// diff_payment is clamped to 0 for returns (its amounts are negative), so
+			// the remaining refund has to be worked out from the absolute values.
+			let remaining;
+			if (isReturn) {
+				const invoiceTotal = this.invoice_doc.rounded_total || this.invoice_doc.grand_total;
+				remaining = this.flt(
+					Math.abs(this.flt(invoiceTotal)) - Math.abs(this.total_payments),
+					this.currency_precision,
+				);
+			} else {
+				remaining = this.diff_payment;
+			}
+			if (remaining <= 0) {
+				return;
+			}
 			this.invoice_doc.payments.forEach((payment) => {
-				if (payment.idx === idx && payment.amount === 0 && this.diff_payment > 0) {
-					let amount = this.diff_payment;
-					if (isReturn) {
-						amount = -Math.abs(amount);
-					}
+				if (payment.idx === idx && payment.amount === 0) {
+					const amount = isReturn ? -Math.abs(remaining) : remaining;
 					payment.amount = amount;
 					if (payment.base_amount !== undefined) {
-						payment.base_amount = isReturn ? -Math.abs(amount) : amount;
+						payment.base_amount = amount;
 					}
 				}
 			});

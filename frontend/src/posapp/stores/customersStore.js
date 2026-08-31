@@ -108,6 +108,11 @@ export const useCustomersStore = defineStore("customers", () => {
 	const loadedCustomerCount = ref(0);
 	const posProfile = ref(null);
 	const refreshToken = ref(0);
+	// Full record of the currently selected customer. The `customers` list only
+	// holds the current page of the local cache, so a customer selected
+	// programmatically (e.g. when loading a return invoice) is often missing
+	// from it -- keeping the record here lets the dropdown still render it.
+	const selectedCustomerRecord = ref(null);
 
 	const filteredCustomers = computed(() => (isCustomerBackgroundLoading.value ? [] : customers.value));
 
@@ -133,6 +138,67 @@ export const useCustomersStore = defineStore("customers", () => {
 
 	function setSelectedCustomer(name) {
 		selectedCustomer.value = name || null;
+		ensureCustomerRecord(selectedCustomer.value);
+	}
+
+	function fetchCustomerFromServer(name) {
+		return new Promise((resolve) => {
+			if (isOffline() || typeof frappe === "undefined" || !frappe.call) {
+				resolve(null);
+				return;
+			}
+			frappe.call({
+				method: "frappe.client.get_value",
+				args: {
+					doctype: "Customer",
+					filters: { name },
+					fieldname: ["name", "customer_name", "mobile_no", "email_id", "tax_id"],
+				},
+				callback: (r) => resolve(r.message && r.message.name ? r.message : null),
+				error: () => resolve(null),
+			});
+		});
+	}
+
+	// Make sure `selectedCustomerRecord` holds a displayable record for `name`,
+	// looking in the loaded page first, then the offline cache, then the server.
+	async function ensureCustomerRecord(name) {
+		if (!name) {
+			selectedCustomerRecord.value = null;
+			return null;
+		}
+		if (selectedCustomerRecord.value?.name === name && selectedCustomerRecord.value.customer_name) {
+			return selectedCustomerRecord.value;
+		}
+
+		const loaded = customers.value.find((customer) => customer?.name === name);
+		if (loaded) {
+			selectedCustomerRecord.value = loaded;
+			return loaded;
+		}
+
+		// Fall back to the id so the field is never blank while we resolve the name.
+		selectedCustomerRecord.value = { name, customer_name: name };
+
+		try {
+			await ensureDatabase();
+			const stored = await db.table("customers").get(name);
+			if (stored) {
+				selectedCustomerRecord.value = stored;
+				return stored;
+			}
+		} catch (err) {
+			console.error("Failed to read selected customer from cache", err);
+		}
+
+		const remote = await fetchCustomerFromServer(name);
+		if (remote) {
+			selectedCustomerRecord.value = remote;
+			await setCustomerStorage([remote]).catch(() => {});
+			return remote;
+		}
+
+		return selectedCustomerRecord.value;
 	}
 
 	function setCustomerInfo(info) {
@@ -425,6 +491,7 @@ export const useCustomersStore = defineStore("customers", () => {
 	function clearLocalState() {
 		resetPagination();
 		selectedCustomer.value = null;
+		selectedCustomerRecord.value = null;
 		customerInfo.value = {};
 		loadProgress.value = 0;
 		totalCustomerCount.value = 0;
@@ -437,6 +504,7 @@ export const useCustomersStore = defineStore("customers", () => {
 		customers,
 		filteredCustomers,
 		selectedCustomer,
+		selectedCustomerRecord,
 		customerInfo,
 		searchTerm,
 		page,
@@ -454,6 +522,7 @@ export const useCustomersStore = defineStore("customers", () => {
 		isLoadComplete,
 		setPosProfile,
 		setSelectedCustomer,
+		ensureCustomerRecord,
 		setCustomerInfo,
 		searchCustomers,
 		queueSearch,

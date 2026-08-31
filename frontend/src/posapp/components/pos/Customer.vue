@@ -12,7 +12,7 @@
 			color="primary"
 			:label="frappe._('Customer')"
 			v-model="internalCustomer"
-			:items="filteredCustomers"
+			:items="customerItems"
 			item-title="customer_name"
 			item-value="name"
 			:no-data-text="
@@ -166,6 +166,7 @@ export default {
 			loadingCustomers,
 			isCustomerBackgroundLoading,
 			selectedCustomer,
+			selectedCustomerRecord,
 			customerInfo,
 		} = storeToRefs(customersStore);
 
@@ -178,6 +179,33 @@ export default {
 		let scrollContainer = null;
 
 		const effectiveReadonly = computed(() => readonlyState.value && navigator.onLine);
+
+		// `filteredCustomers` only holds the current page of the local cache (and is
+		// empty while customers are syncing in the background). Without the selected
+		// customer in the item list, v-autocomplete renders a blank field -- which is
+		// what happened when a return invoice set the customer programmatically.
+		const customerItems = computed(() => {
+			const list = filteredCustomers.value || [];
+			const selected = internalCustomer.value;
+			if (!selected || list.some((customer) => customer?.name === selected)) {
+				return list;
+			}
+			const record =
+				selectedCustomerRecord.value?.name === selected
+					? selectedCustomerRecord.value
+					: { name: selected, customer_name: selected };
+			return [record, ...list];
+		});
+
+		watch(
+			internalCustomer,
+			(value) => {
+				if (value) {
+					customersStore.ensureCustomerRecord(value);
+				}
+			},
+			{ immediate: true },
+		);
 
 		const searchDebounce = _.debounce((term) => {
 			customersStore.queueSearch(term || "");
@@ -375,6 +403,7 @@ export default {
 		return {
 			customerDropdown,
 			filteredCustomers,
+			customerItems,
 			loadingCustomers,
 			isCustomerBackgroundLoading,
 			internalCustomer,

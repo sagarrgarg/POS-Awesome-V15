@@ -188,6 +188,9 @@
 								}"
 								:items-per-page="25"
 							>
+								<template v-slot:item.customer_name="{ item }">
+									{{ item.customer_name || item.customer }}
+								</template>
 								<template v-slot:item.posting_date="{ item }">
 									{{ formatDateDisplay(item.posting_date) }}
 								</template>
@@ -264,7 +267,7 @@ export default {
 		headers: [
 			{
 				title: __("Customer"),
-				value: "customer",
+				value: "customer_name",
 				align: "start",
 				sortable: true,
 			},
