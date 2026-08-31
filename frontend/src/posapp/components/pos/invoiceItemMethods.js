@@ -1689,8 +1689,12 @@ export default {
 		if (this.isReturnInvoice) {
 			console.log("Validating return invoice values");
 
-			// Check if quantities are negative
-			const positiveItems = this.items.filter((item) => item.qty >= 0 || item.stock_qty >= 0);
+			// Check if quantities are negative. Use > 0 rather than >= 0: a zero qty
+			// row is not a sign error, and negating it changes nothing -- flagging it
+			// only produced a spurious error toast.
+			const positiveItems = this.items.filter(
+				(item) => flt(item.qty) > 0 || flt(item.stock_qty) > 0,
+			);
 			if (positiveItems.length > 0) {
 				console.log(
 					"Found positive quantities in return items:",
@@ -1711,9 +1715,16 @@ export default {
 				this.$forceUpdate();
 			}
 
-			// Ensure total amount is negative
-			if (this.subtotal > 0) {
-				console.log("Return has positive subtotal:", this.subtotal);
+			// Ensure the amount that will actually be posted is negative.
+			// `subtotal` is a display value -- invoiceComputed deliberately returns
+			// Math.abs() of it for returns -- so testing it here warned on every
+			// single valid return. Check the signed item total instead.
+			const signedItemsTotal = this.items.reduce(
+				(sum, item) => sum + flt(item.qty) * flt(item.rate),
+				0,
+			);
+			if (signedItemsTotal > 0) {
+				console.log("Return has positive signed total:", signedItemsTotal);
 				this.eventBus.emit("show_message", {
 					title: __(`Return total must be negative`),
 					color: "warning",
