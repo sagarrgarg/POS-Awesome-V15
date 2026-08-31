@@ -22,8 +22,11 @@ build-backend = "flit_core.buildapi"
 
 
 [tool.bench.frappe-dependencies]
-frappe = ">=15.0.0"
-erpnext = ">=15.0.0"
+# Bounded on both sides: Frappe Cloud rejects open-ended ranges, and this app
+# targets the v15 line (frappe/erpnext version-15, posawesome 15.x). Raise the
+# upper bound only once the app has actually been tested against v16.
+frappe = ">=15.0.0,<16.0.0"
+erpnext = ">=15.0.0,<16.0.0"
 
 [tool.ruff]
 line-length = 110
