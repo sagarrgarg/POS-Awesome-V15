@@ -199,10 +199,9 @@ export default {
 			drawer: false,
 			mini: true,
 			item: 0,
-			items: [
-				{ text: "POS", icon: "mdi-network-pos" },
-				{ text: "Payments", icon: "mdi-credit-card" },
-			],
+			// Single destination: the Payments page was removed, so the drawer
+			// no longer switches between screens.
+			items: [{ text: "POS", icon: "mdi-network-pos" }],
 			company: "POS Awesome",
 			companyImg: posLogo,
 			showAboutDialog: false,

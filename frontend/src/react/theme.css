@@ -1,0 +1,89 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/**
+ * POSAwesome — React checkout screen.
+ *
+ * Flat, dense, no gradients anywhere. Colour is used to identify things (item
+ * categories, action intent), never as decoration, and every surface is a solid
+ * fill with a 1px border rather than a shadow stack.
+ */
+
+:root {
+	/* Set by the Frappe page once it has measured the desk navbar, so the app
+	   can pin itself to the exact remaining viewport. */
+	--posnext-top: 60px;
+
+	--pn-bg: #f1f5f9;
+	--pn-surface: #ffffff;
+	--pn-border: #e2e8f0;
+	--pn-border-strong: #cbd5e1;
+	--pn-text: #0f172a;
+	--pn-muted: #64748b;
+}
+
+/* The whole point of the redesign: the page never scrolls. Only the item grid
+   and the cart list do, and each owns its own scroll container. */
+.posnext-root {
+	position: fixed;
+	top: var(--posnext-top);
+	left: 0;
+	right: 0;
+	bottom: 0;
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
+	background: var(--pn-bg);
+	color: var(--pn-text);
+	font-size: 0.875rem;
+	-webkit-font-smoothing: antialiased;
+}
+
+/* Frappe's page wrapper adds padding and a card background that would show
+   through underneath the fixed root. */
+.posnext-host {
+	padding: 0 !important;
+	margin: 0 !important;
+	background: transparent !important;
+}
+
+@layer components {
+	.pn-scroll {
+		overflow-y: auto;
+		overscroll-behavior: contain;
+		-webkit-overflow-scrolling: touch;
+		scrollbar-width: thin;
+		scrollbar-color: var(--pn-border-strong) transparent;
+	}
+
+	.pn-scroll::-webkit-scrollbar {
+		width: 6px;
+		height: 6px;
+	}
+
+	.pn-scroll::-webkit-scrollbar-thumb {
+		background: var(--pn-border-strong);
+		border-radius: 999px;
+	}
+
+	/* Every tappable control: kills the 300ms delay, the grey tap flash and
+	   accidental text selection from fast repeat taps. */
+	.pn-tap {
+		touch-action: manipulation;
+		-webkit-tap-highlight-color: transparent;
+		user-select: none;
+		cursor: pointer;
+	}
+
+	/* Tabular figures stop prices jittering as digits change — the single
+	   biggest scannability win on a totals column. */
+	.pn-num {
+		font-variant-numeric: tabular-nums;
+	}
+
+	.pn-focus:focus-visible {
+		outline: 2px solid #2563eb;
+		outline-offset: 1px;
+	}
+}
