@@ -1,6 +1,8 @@
 import { StrictMode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import App from "./App";
+import { PosThemeProvider } from "./ThemeProvider";
+import "@radix-ui/themes/styles.css";
 import "./theme.css";
 
 /**
@@ -27,6 +29,7 @@ function syncNavbarOffset() {
 
 export function mount(container: HTMLElement): void {
 	syncNavbarOffset();
+	// Removed in unmount(); mount() is only ever called once per page show.
 	window.addEventListener("resize", syncNavbarOffset, { passive: true });
 
 	container.classList.add("posnext-host");
@@ -35,7 +38,9 @@ export function mount(container: HTMLElement): void {
 	}
 	root.render(
 		<StrictMode>
-			<App />
+			<PosThemeProvider>
+				<App />
+			</PosThemeProvider>
 		</StrictMode>,
 	);
 }
@@ -44,10 +49,4 @@ export function unmount(): void {
 	window.removeEventListener("resize", syncNavbarOffset);
 	root?.unmount();
 	root = null;
-}
-
-declare global {
-	interface Window {
-		PosAwesomeReact?: { mount: typeof mount; unmount: typeof unmount };
-	}
 }

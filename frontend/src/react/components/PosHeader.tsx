@@ -1,3 +1,4 @@
+import { Flex, Separator, Text } from "@radix-ui/themes";
 import { t } from "../lib/frappe";
 import { StatusPill } from "./StatusPill";
 
@@ -13,12 +14,19 @@ interface PosHeaderProps {
  */
 export function PosHeader({ profileName, online }: PosHeaderProps) {
 	return (
-		<header className="flex h-9 shrink-0 items-center gap-2 border-b border-line bg-surface px-2">
-			<span className="text-xs font-bold tracking-tight">{t("POS")}</span>
-			<span className="truncate text-2xs text-muted">{profileName}</span>
-			<span className="ml-auto">
-				<StatusPill online={online} />
-			</span>
-		</header>
+		<>
+			<Flex align="center" gap="2" px="3" py="1" flexShrink="0">
+				<Text size="2" weight="bold">
+					{t("POS")}
+				</Text>
+				<Text size="1" color="gray" truncate>
+					{profileName}
+				</Text>
+				<Flex ml="auto">
+					<StatusPill online={online} />
+				</Flex>
+			</Flex>
+			<Separator size="4" />
+		</>
 	);
 }

@@ -1,3 +1,13 @@
+import {
+	Badge,
+	Box,
+	Button,
+	Flex,
+	Grid,
+	Separator,
+	Spinner,
+	Text,
+} from "@radix-ui/themes";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CartPanel } from "./components/CartPanel";
 import { ItemGrid } from "./components/ItemGrid";
@@ -7,6 +17,7 @@ import { useCart } from "./hooks/useCart";
 import { useItems } from "./hooks/useItems";
 import { useOnlineStatus } from "./hooks/useOnlineStatus";
 import { usePosSession } from "./hooks/usePosSession";
+import { currencySymbol, formatCurrency } from "./lib/format";
 import { t } from "./lib/frappe";
 import {
 	paymentModes,
@@ -17,7 +28,7 @@ import {
 } from "./lib/sale";
 import type { PosItem } from "./lib/types";
 
-/** Below this the cart becomes a bottom sheet instead of a second column. */
+/** Below this the cart becomes a sheet instead of a second column. */
 const SPLIT_MIN_WIDTH = 900;
 
 function useIsSplit(): boolean {
@@ -132,36 +143,49 @@ export default function App() {
 
 	if (session.loading) {
 		return (
-			<div className="posnext-root items-center justify-center">
-				<p className="text-xs text-muted">{t("Loading POS…")}</p>
-			</div>
+			<Flex align="center" justify="center" gap="2" flexGrow="1">
+				<Spinner />
+				<Text size="2" color="gray">
+					{t("Loading POS…")}
+				</Text>
+			</Flex>
 		);
 	}
 
 	if (!session.profile) {
 		return (
-			<div className="posnext-root items-center justify-center gap-2">
-				<p className="text-sm font-semibold">
+			<Flex
+				align="center"
+				justify="center"
+				direction="column"
+				gap="2"
+				flexGrow="1"
+				p="4"
+			>
+				<Text size="3" weight="bold">
 					{t("No open POS shift")}
-				</p>
-				<p className="max-w-xs text-center text-xs text-muted">
+				</Text>
+				<Text
+					size="1"
+					color="gray"
+					align="center"
+					style={{ maxWidth: "22rem" }}
+				>
 					{t(
 						"Open a shift from the classic POS screen, then reload this page.",
 					)}
-				</p>
-				<button
-					type="button"
-					onClick={session.reload}
-					className="pn-tap pn-focus rounded border border-line-strong px-3 py-1.5 text-xs font-semibold"
-				>
+				</Text>
+				<Button size="2" variant="soft" onClick={session.reload}>
 					{t("Retry")}
-				</button>
-			</div>
+				</Button>
+			</Flex>
 		);
 	}
 
 	// Due is the server's grand total once a draft exists; before that the cart
 	// subtotal is only ever used to enable the button, never to take money.
+	// `rounded_total` is legitimately 0 when rounding is disabled, so falling
+	// through on a falsy value is the behaviour we want here.
 	const due = Number(
 		draft?.rounded_total || draft?.grand_total || cart.totals.total,
 	);
@@ -181,82 +205,153 @@ export default function App() {
 	);
 
 	return (
-		<div className="posnext-root">
+		<>
 			<PosHeader profileName={session.profile.name} online={online} />
 
-			<main
-				className={
-					split
-						? "grid min-h-0 flex-1 grid-cols-[1fr_360px] overflow-hidden"
-						: "flex min-h-0 flex-1 flex-col overflow-hidden"
-				}
-			>
-				<ItemGrid
-					items={items}
-					groups={groups}
-					group={group}
-					search={search}
-					loading={loading}
-					error={error}
-					currency={currency}
-					onGroupChange={setGroup}
-					onSearchChange={setSearch}
-					onPick={onPick}
-					onSearchEnter={onSearchEnter}
-				/>
+			{split ? (
+				<Grid
+					columns="1fr 360px"
+					flexGrow="1"
+					minHeight="0"
+					overflow="hidden"
+					asChild
+				>
+					<main>
+						<ItemGrid
+							items={items}
+							groups={groups}
+							group={group}
+							search={search}
+							loading={loading}
+							error={error}
+							currency={currency}
+							onGroupChange={setGroup}
+							onSearchChange={setSearch}
+							onPick={onPick}
+							onSearchEnter={onSearchEnter}
+						/>
+						{cartPanel}
+					</main>
+				</Grid>
+			) : (
+				<Flex
+					direction="column"
+					flexGrow="1"
+					minHeight="0"
+					overflow="hidden"
+					asChild
+				>
+					<main>
+						<ItemGrid
+							items={items}
+							groups={groups}
+							group={group}
+							search={search}
+							loading={loading}
+							error={error}
+							currency={currency}
+							onGroupChange={setGroup}
+							onSearchChange={setSearch}
+							onPick={onPick}
+							onSearchEnter={onSearchEnter}
+						/>
+					</main>
+				</Flex>
+			)}
 
-				{split && cartPanel}
-			</main>
-
-			{/* Compact: the cart is a sheet, and a fixed bar keeps the total and
+			{/* Compact: the cart slides over, and a fixed bar keeps the total and
 			    the pay action one tap away without stealing grid height. */}
 			{!split && (
 				<>
-					<div
-						className={[
-							"fixed inset-x-0 bottom-0 z-40 flex flex-col bg-surface transition-transform duration-200",
-							cartOpen ? "translate-y-0" : "translate-y-full",
-						].join(" ")}
-						style={{ top: "var(--posnext-top)" }}
+					<Box
+						position="fixed"
+						left="0"
+						right="0"
+						bottom="0"
 						aria-hidden={!cartOpen}
+						style={{
+							top: "var(--posnext-top)",
+							zIndex: 40,
+							display: "flex",
+							flexDirection: "column",
+							background: "var(--color-panel-solid)",
+							transform: cartOpen
+								? "translateY(0)"
+								: "translateY(100%)",
+							// `visibility` (not `display`) so the closed sheet keeps
+							// its size — opening is one compositor frame — while
+							// still being untabbable and hidden from screen readers.
+							visibility: cartOpen ? "visible" : "hidden",
+							transition: cartOpen
+								? "transform 200ms ease-out, visibility 0s"
+								: "transform 200ms ease-in, visibility 0s 200ms",
+						}}
 					>
-						<button
-							type="button"
+						<Button
+							size="1"
+							variant="ghost"
+							color="gray"
+							className="pn-tap"
+							style={{ margin: "var(--space-2)" }}
 							onClick={() => setCartOpen(false)}
-							className="pn-tap h-8 shrink-0 border-b border-line text-xs font-semibold text-muted"
 						>
 							{t("Close cart")}
-						</button>
-						<div className="flex min-h-0 flex-1 flex-col">
+						</Button>
+						<Separator size="4" />
+						<Flex direction="column" flexGrow="1" minHeight="0">
 							{cartPanel}
-						</div>
-					</div>
+						</Flex>
+					</Box>
 
-					<div className="flex h-14 shrink-0 items-center gap-2 border-t border-line bg-surface px-2">
-						<button
-							type="button"
+					<Separator size="4" />
+					<Flex
+						align="center"
+						gap="2"
+						px="2"
+						py="2"
+						flexShrink="0"
+						style={{ background: "var(--color-panel-solid)" }}
+					>
+						<Button
+							size="2"
+							variant="soft"
+							color="gray"
+							className="pn-tap"
 							onClick={() => setCartOpen(true)}
-							className="pn-tap pn-focus relative h-10 rounded border border-line-strong px-3 text-xs font-bold"
 						>
 							{t("Cart")}
 							{cart.totals.count > 0 && (
-								<span className="pn-num absolute -right-1.5 -top-1.5 rounded-full bg-crayon-orange px-1.5 text-2xs font-bold text-white">
+								<Badge
+									color="orange"
+									radius="full"
+									size="1"
+									className="pn-num"
+								>
 									{cart.totals.count}
-								</span>
+								</Badge>
 							)}
-						</button>
-						<span className="pn-num flex-1 truncate text-lg font-extrabold">
-							{cart.totals.total.toFixed(2)}
-						</span>
-						<button
-							type="button"
-							onClick={startPayment}
+						</Button>
+						<Text
+							size="5"
+							weight="bold"
+							className="pn-num"
+							truncate
+							style={{ flex: 1 }}
+						>
+							{currencySymbol(currency)}
+							{formatCurrency(cart.totals.total)}
+						</Text>
+						<Button
+							size="3"
+							color="green"
+							className="pn-tap"
 							disabled={!cart.lines.length || submitting}
-							className="pn-tap pn-focus h-10 rounded-md bg-crayon-green px-5 text-sm font-extrabold uppercase text-white disabled:bg-line-strong disabled:text-muted"
+							loading={submitting}
+							onClick={startPayment}
 						>
 							{t("Pay")}
-						</button>
-					</div>
+						</Button>
+					</Flex>
 				</>
 			)}
 
@@ -273,6 +368,6 @@ export default function App() {
 				}}
 				onConfirm={confirmPayment}
 			/>
-		</div>
+		</>
 	);
 }

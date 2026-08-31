@@ -1,3 +1,4 @@
+import { Badge } from "@radix-ui/themes";
 import { t } from "../lib/frappe";
 
 /**
@@ -10,24 +11,15 @@ import { t } from "../lib/frappe";
  */
 export function StatusPill({ online }: { online: boolean }) {
 	return (
-		<span
-			className={[
-				"inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-2xs font-semibold",
-				online
-					? "bg-crayon-green/10 text-crayon-green"
-					: "bg-crayon-red/10 text-crayon-red",
-			].join(" ")}
+		<Badge
+			color={online ? "green" : "red"}
+			variant="soft"
+			radius="full"
+			size="1"
 			role="status"
 			aria-live="polite"
 		>
-			<span
-				aria-hidden="true"
-				className={[
-					"h-1.5 w-1.5 rounded-full",
-					online ? "bg-crayon-green" : "bg-crayon-red",
-				].join(" ")}
-			/>
 			{online ? t("Online") : t("Offline")}
-		</span>
+		</Badge>
 	);
 }
