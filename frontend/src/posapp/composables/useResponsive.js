@@ -1,86 +1,112 @@
-import { ref, computed, onMounted, onBeforeUnmount } from "vue";
+/**
+ * Responsive metrics for the POS surfaces.
+ *
+ * Backed by `useBreakpoints` (matchMedia driven), so this no longer recomputes
+ * on every resize frame. The previously exported shape is preserved — callers
+ * still get `windowWidth`, `dynamicSpacing`, `responsiveStyles` and friends —
+ * but the values are now derived from a fixed reference viewport instead of
+ * "whatever the window happened to be at mount", which made every scale start
+ * at exactly 1.0 and then drift.
+ *
+ * `responsiveStyles` is also mirrored onto :root, because a few components read
+ * `--container-height` off `document.documentElement` directly.
+ */
+
+import { computed, onBeforeUnmount, onMounted, watch } from "vue";
+import { useBreakpoints } from "./useBreakpoints.js";
+
+/** Reference viewport the spacing scale is authored against (a 13" laptop). */
+const REFERENCE_WIDTH = 1440;
+const REFERENCE_HEIGHT = 900;
+
+const BASE_SPACING = Object.freeze({ xs: 4, sm: 8, md: 16, lg: 24, xl: 32 });
+const MIN_SPACING = Object.freeze({ xs: 2, sm: 4, md: 8, lg: 12, xl: 16 });
+
+const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+
+/** Chrome above the POS panes: Frappe navbar + POSAwesome navbar + gutters. */
+const CHROME_HEIGHT = Object.freeze({
+	mobile: 132,
+	tablet: 140,
+	laptop: 148,
+	desktop: 152,
+});
 
 export function useResponsive() {
-	const windowWidth = ref(window.innerWidth);
-	const windowHeight = ref(window.innerHeight);
-	const baseWidth = ref(window.innerWidth);
-	const baseHeight = ref(window.innerHeight);
+	const bp = useBreakpoints();
 
-	const widthScale = computed(() => windowWidth.value / baseWidth.value);
-	const heightScale = computed(() => windowHeight.value / baseHeight.value);
+	const windowWidth = bp.width;
+	const windowHeight = bp.height;
+
+	// Retained for API compatibility; they are now stable reference values
+	// rather than a snapshot of the first render.
+	const baseWidth = computed(() => REFERENCE_WIDTH);
+	const baseHeight = computed(() => REFERENCE_HEIGHT);
+
+	const widthScale = computed(() => clamp(windowWidth.value / REFERENCE_WIDTH, 0.72, 1.35));
+	const heightScale = computed(() => clamp(windowHeight.value / REFERENCE_HEIGHT, 0.72, 1.35));
 	const averageScale = computed(() => (widthScale.value + heightScale.value) / 2);
 
 	const dynamicSpacing = computed(() => {
-		const baseSpacing = {
-			xs: 4,
-			sm: 8,
-			md: 16,
-			lg: 24,
-			xl: 32,
-		};
-
-		return {
-			xs: Math.max(2, Math.round(baseSpacing.xs * averageScale.value)),
-			sm: Math.max(4, Math.round(baseSpacing.sm * averageScale.value)),
-			md: Math.max(8, Math.round(baseSpacing.md * averageScale.value)),
-			lg: Math.max(12, Math.round(baseSpacing.lg * averageScale.value)),
-			xl: Math.max(16, Math.round(baseSpacing.xl * averageScale.value)),
-		};
+		const scale = averageScale.value;
+		return Object.keys(BASE_SPACING).reduce((acc, key) => {
+			acc[key] = Math.max(MIN_SPACING[key], Math.round(BASE_SPACING[key] * scale));
+			return acc;
+		}, {});
 	});
+
+	/**
+	 * Height available to a pane, measured rather than guessed at 68vh. Using
+	 * the visual viewport keeps the panes correct when the mobile keyboard or
+	 * the collapsing URL bar eats into the window.
+	 */
+	const containerHeight = computed(() => {
+		const chrome = CHROME_HEIGHT[bp.breakpoint.value] ?? CHROME_HEIGHT.laptop;
+		return Math.max(280, Math.round(windowHeight.value - chrome));
+	});
+
+	/** Height of the item-card grid area within the selector pane. */
+	const cardHeight = computed(() => Math.round(containerHeight.value * (bp.isCompact.value ? 0.72 : 0.78)));
 
 	const responsiveStyles = computed(() => {
-		let cardHeightVh;
-		if (windowWidth.value <= 480) {
-			cardHeightVh = Math.round(45 * heightScale.value);
-		} else if (windowWidth.value <= 768) {
-			cardHeightVh = Math.round(55 * heightScale.value);
-		} else {
-			cardHeightVh = Math.round(60 * heightScale.value);
-		}
-
-		cardHeightVh = Math.max(30, Math.min(cardHeightVh, 70));
-
+		const spacing = dynamicSpacing.value;
 		return {
-			"--dynamic-xs": `${dynamicSpacing.value.xs}px`,
-			"--dynamic-sm": `${dynamicSpacing.value.sm}px`,
-			"--dynamic-md": `${dynamicSpacing.value.md}px`,
-			"--dynamic-lg": `${dynamicSpacing.value.lg}px`,
-			"--dynamic-xl": `${dynamicSpacing.value.xl}px`,
-			"--container-height": `${Math.round(68 * heightScale.value)}vh`,
-			"--card-height": `${cardHeightVh}vh`,
+			"--dynamic-xs": `${spacing.xs}px`,
+			"--dynamic-sm": `${spacing.sm}px`,
+			"--dynamic-md": `${spacing.md}px`,
+			"--dynamic-lg": `${spacing.lg}px`,
+			"--dynamic-xl": `${spacing.xl}px`,
+			"--container-height": `${containerHeight.value}px`,
+			"--card-height": `${cardHeight.value}px`,
 			"--font-scale": averageScale.value.toFixed(2),
+			"--pos-keyboard-inset": `${bp.keyboardInset.value}px`,
 		};
 	});
 
-	let resizeRafId = null;
+	// Mirror onto :root so non-Vue CSS and the few getComputedStyle() readers
+	// pick up real pixel values instead of falling back to a hardcoded "68vh".
+	let stopMirror = null;
 
-	const handleResize = () => {
-		// Debounce with requestAnimationFrame for better performance
-		if (resizeRafId) {
-			cancelAnimationFrame(resizeRafId);
-		}
-
-		resizeRafId = requestAnimationFrame(() => {
-			windowWidth.value = window.innerWidth;
-			windowHeight.value = window.innerHeight;
-			resizeRafId = null;
-		});
+	const applyToRoot = (styles) => {
+		if (typeof document === "undefined" || !document.documentElement) return;
+		const root = document.documentElement;
+		Object.entries(styles).forEach(([key, value]) => root.style.setProperty(key, value));
 	};
 
 	onMounted(() => {
-		handleResize();
-		window.addEventListener("resize", handleResize);
+		applyToRoot(responsiveStyles.value);
+		stopMirror = watch(responsiveStyles, applyToRoot, { flush: "post" });
 	});
 
 	onBeforeUnmount(() => {
-		window.removeEventListener("resize", handleResize);
-		if (resizeRafId) {
-			cancelAnimationFrame(resizeRafId);
-			resizeRafId = null;
+		if (stopMirror) {
+			stopMirror();
+			stopMirror = null;
 		}
 	});
 
 	return {
+		// Original surface
 		windowWidth,
 		windowHeight,
 		baseWidth,
@@ -90,5 +116,19 @@ export function useResponsive() {
 		averageScale,
 		dynamicSpacing,
 		responsiveStyles,
+		// Layout state
+		breakpoint: bp.breakpoint,
+		isMobile: bp.isMobile,
+		isTablet: bp.isTablet,
+		isLaptop: bp.isLaptop,
+		isDesktop: bp.isDesktop,
+		isCompact: bp.isCompact,
+		isSplit: bp.isSplit,
+		isPortrait: bp.isPortrait,
+		isTouch: bp.isTouch,
+		prefersReducedMotion: bp.prefersReducedMotion,
+		keyboardInset: bp.keyboardInset,
+		containerHeight,
+		cardHeight,
 	};
 }

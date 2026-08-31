@@ -498,7 +498,8 @@ html[dir="rtl"] .v-chip .v-chip__append,
 }
 
 /* POS-specific RTL styles */
-.rtl-layout .pos-main-container {
+.rtl-layout .pos-main-container,
+.rtl-layout .pos-shell {
 	direction: rtl;
 }
 
@@ -525,7 +526,8 @@ html[dir="rtl"] .v-chip .v-chip__append,
 }
 
 /* RTL-aware dynamic spacing */
-.rtl-layout .dynamic-col {
+.rtl-layout .dynamic-col,
+.rtl-layout .pos-pane {
 	text-align: right;
 }
 

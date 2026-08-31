@@ -6,6 +6,7 @@ import "@vuepic/vue-datepicker/dist/main.css";
 import "../../../posawesome/public/css/rtl.css";
 import "../style.css";
 import "./styles/theme.css";
+import "./styles/pos-ui.css";
 import eventBus from "./bus";
 import themePlugin from "./plugins/theme.js";
 import { pinia } from "./stores/index.js";

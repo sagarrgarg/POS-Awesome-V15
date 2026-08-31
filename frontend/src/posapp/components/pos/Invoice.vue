@@ -318,6 +318,7 @@
 			@load-drafts="get_draft_invoices"
 			@select-order="get_draft_orders"
 			@cancel-sale="cancel_dialog = true"
+			@cancel-sale-confirmed="cancel_invoice"
 			@open-returns="open_returns"
 			@print-draft="print_draft_invoice"
 			@apply-offers="apply_offers_and_reload"
@@ -1399,6 +1400,10 @@ export default {
                         reset_posting_date: this.handleResetPostingDate,
                         calc_uom: this.calc_uom,
                         show_payment: this.handleShowPayment,
+                        // Raised by the compact checkout dock. Routed through
+                        // show_payment() so the dock cannot skip the customer,
+                        // item and stock validation the in-cart button runs.
+                        request_payment: this.show_payment,
                 };
 
                 Object.entries(this._busHandlers).forEach(([eventName, handler]) => {

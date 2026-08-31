@@ -1,0 +1,236 @@
+/**
+ * POSAwesome UI foundation layer
+ * -----------------------------------------------------------------------------
+ * Design tokens + the handful of utility classes the checkout surfaces share.
+ *
+ * Everything is namespaced with `pos-` so it can live alongside Frappe's desk
+ * CSS without leaking. Colour tokens stay in theme.css; this file owns motion,
+ * density, geometry and interaction ergonomics.
+ *
+ * Breakpoint-scoped values are keyed off `[data-pos-bp]`, written onto <html> by
+ * useBreakpoints.js — density switches with no Vue re-render at all.
+ *
+ * Scope note: every token and class below has at least one consumer. Anything
+ * that stops being referenced should be deleted rather than left as a palette.
+ */
+
+:root {
+	/* ---- Motion ---------------------------------------------------------- */
+	/* Kept deliberately short: at a till, motion must confirm, never delay. */
+	--pos-dur-instant: 90ms;
+	--pos-dur-fast: 140ms;
+	--pos-dur-base: 190ms;
+	--pos-dur-slow: 260ms;
+
+	--pos-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+	--pos-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+	--pos-ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
+
+	/* ---- Geometry -------------------------------------------------------- */
+	--pos-radius-xs: 6px;
+	--pos-radius-sm: 10px;
+	--pos-radius-md: 14px;
+	--pos-radius-xl: 24px;
+	--pos-radius-pill: 999px;
+
+	/* ---- Elevation ------------------------------------------------------- */
+	--pos-elev-1: 0 1px 2px var(--pos-shadow-light, rgba(0, 0, 0, 0.05));
+	--pos-elev-3:
+		0 4px 8px var(--pos-shadow, rgba(0, 0, 0, 0.1)),
+		0 16px 40px var(--pos-shadow-dark, rgba(0, 0, 0, 0.16));
+
+	/* ---- Hit targets ----------------------------------------------------- */
+	/* WCAG 2.2 target size (minimum) is 24px; retail gloves need much more. */
+	--pos-hit-min: 44px;
+	--pos-hit-comfortable: 52px;
+	--pos-hit-primary: 60px;
+	/* Dead space guarding a destructive control from the primary one. */
+	--pos-danger-gap: 16px;
+
+	/* ---- Density (overridden per breakpoint below) ----------------------- */
+	--pos-gutter: 16px;
+	--pos-gap: 12px;
+	--pos-pane-gap: 12px;
+
+	/* ---- Layout ---------------------------------------------------------- */
+	--pos-safe-bottom: env(safe-area-inset-bottom, 0px);
+	--pos-safe-top: env(safe-area-inset-top, 0px);
+	--pos-dock-height: 68px;
+	--pos-sheet-max-height: 88vh;
+
+	/* ---- Z layers -------------------------------------------------------- */
+	--pos-z-dock: 60;
+	--pos-z-scrim: 70;
+	--pos-z-sheet: 80;
+
+	/* ---- Focus ----------------------------------------------------------- */
+	/* Plain rgba first: browsers without color-mix() drop the second declaration
+	   and keep a usable ring rather than losing focus indication entirely. */
+	--pos-focus-ring: 0 0 0 3px rgba(0, 151, 167, 0.45);
+	--pos-focus-ring: 0 0 0 3px color-mix(in srgb, var(--pos-primary, #0097a7) 45%, transparent);
+}
+
+[data-pos-bp="mobile"] {
+	--pos-gutter: 10px;
+	--pos-gap: 8px;
+	--pos-pane-gap: 8px;
+	--pos-dock-height: 64px;
+}
+
+[data-pos-bp="tablet"] {
+	--pos-gutter: 14px;
+	--pos-gap: 10px;
+	--pos-pane-gap: 10px;
+}
+
+[data-pos-bp="laptop"] {
+	--pos-gutter: 16px;
+	--pos-gap: 12px;
+	--pos-pane-gap: 12px;
+}
+
+[data-pos-bp="desktop"] {
+	--pos-gutter: 20px;
+	--pos-gap: 14px;
+	--pos-pane-gap: 16px;
+}
+
+/* Coarse pointers get larger minimums regardless of viewport size. */
+[data-pos-pointer="coarse"] {
+	--pos-hit-min: 48px;
+	--pos-hit-comfortable: 56px;
+	--pos-hit-primary: 64px;
+	--pos-danger-gap: 20px;
+}
+
+/* =============================================================================
+ * Utilities
+ * ========================================================================== */
+
+/* Scroll containers: momentum on iOS, unobtrusive scrollbars, and containment
+ * so a list repaint never invalidates layout for the whole checkout screen. */
+.pos-scroll {
+	overflow-y: auto;
+	-webkit-overflow-scrolling: touch;
+	overscroll-behavior: contain;
+	scrollbar-width: thin;
+	scrollbar-color: var(--pos-outline, rgba(0, 0, 0, 0.2)) transparent;
+	contain: paint;
+}
+
+.pos-scroll::-webkit-scrollbar {
+	width: 8px;
+	height: 8px;
+}
+
+.pos-scroll::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+.pos-scroll::-webkit-scrollbar-thumb {
+	background: var(--pos-outline, rgba(0, 0, 0, 0.2));
+	border-radius: var(--pos-radius-pill);
+}
+
+/* Any control a cashier taps in rapid succession. Removes the 300ms tap delay,
+ * the grey flash, and accidental text selection from double taps. */
+.pos-tap {
+	touch-action: manipulation;
+	-webkit-tap-highlight-color: transparent;
+	-webkit-user-select: none;
+	user-select: none;
+	cursor: pointer;
+}
+
+.pos-hit {
+	min-height: var(--pos-hit-min);
+	min-width: var(--pos-hit-min);
+}
+
+/* Numeric readouts: tabular figures stop prices from jittering as they change,
+ * which is the single biggest scannability win on a totals panel. */
+.pos-num {
+	font-variant-numeric: tabular-nums;
+	font-feature-settings: "tnum" 1;
+	letter-spacing: -0.01em;
+}
+
+.pos-truncate {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	min-width: 0;
+}
+
+/* Visible focus for keyboard users without a permanent outline for mouse ones. */
+.pos-focusable:focus-visible {
+	outline: none;
+	box-shadow: var(--pos-focus-ring);
+}
+
+/* Pressed-state feedback that costs one compositor frame and nothing else.
+ * No `will-change` here on purpose: this class lands on a dozen buttons at once
+ * and promoting them all to their own layer costs more than it saves. */
+.pos-press {
+	transition:
+		transform var(--pos-dur-instant) var(--pos-ease-out),
+		background-color var(--pos-dur-fast) var(--pos-ease-out);
+}
+
+.pos-press:active {
+	transform: scale(0.97);
+}
+
+/* One-shot emphasis when a value changes (total, cart badge). Referenced by
+ * name from component-scoped styles; keyframes are not scoped, so this
+ * resolves from anywhere. */
+@keyframes pos-pop {
+	0% {
+		transform: scale(1);
+	}
+	40% {
+		transform: scale(1.09);
+	}
+	100% {
+		transform: scale(1);
+	}
+}
+
+/* =============================================================================
+ * Accessibility
+ * ========================================================================== */
+
+/* Applied to <html> by utils/scrollLock.js while an overlay owns the screen, so
+ * a drag that escapes the sheet does not scroll the checkout behind it. */
+.pos-scroll-locked,
+.pos-scroll-locked body {
+	overflow: hidden !important;
+	overscroll-behavior: none;
+}
+
+.pos-sr-only {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	padding: 0;
+	margin: -1px;
+	overflow: hidden;
+	clip: rect(0, 0, 0, 0);
+	white-space: nowrap;
+	border: 0;
+}
+
+/* Honour the OS setting: collapse durations to a value that still fires
+ * transitionend (so JS cleanup hooks run) but reads as instant. */
+@media (prefers-reduced-motion: reduce) {
+	:root {
+		--pos-dur-instant: 1ms;
+		--pos-dur-fast: 1ms;
+		--pos-dur-base: 1ms;
+		--pos-dur-slow: 1ms;
+	}
+
+	.pos-press:active {
+		transform: none;
+	}
+}

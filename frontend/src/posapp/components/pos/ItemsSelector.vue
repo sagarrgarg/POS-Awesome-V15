@@ -61,7 +61,7 @@
 								hide-details
 								v-model="debounce_search"
 								@keydown.esc="esc_event"
-								@keydown.enter="search_onchange"
+								@keydown.enter="enterSearch"
 								@click:clear="clearSearch"
 								prepend-inner-icon="mdi-magnify"
 								@focus="handleItemSearchFocus"
@@ -568,6 +568,80 @@ import Skeleton from "../ui/Skeleton.vue";
 import { useCustomersStore } from "../../stores/customersStore.js";
 import { storeToRefs } from "pinia";
 
+/**
+ * How long a keystroke waits before it becomes a query. Only the query is
+ * delayed — the search box itself paints synchronously (see `debounce_search`).
+ */
+const SEARCH_QUERY_DEBOUNCE_MS = 90;
+
+/**
+ * Per-item lowercase search haystack.
+ *
+ * Building it inside the filter meant every keystroke re-lowercased every
+ * searchable field of every cached item — tens of thousands of throwaway
+ * strings per key on a large catalogue. The cache is keyed on the item object
+ * and invalidated by identity of the three collections that actually change
+ * after load (barcodes, serials, batches), so a stale haystack is not possible
+ * and memory is reclaimed with the items themselves.
+ */
+const searchIndex = new WeakMap();
+
+function getSearchHaystack(item, { includeSerials, includeBatches }) {
+	const barcodes = item.item_barcode;
+	const serials = includeSerials ? item.serial_no_data : null;
+	const batches = includeBatches ? item.batch_no_data : null;
+
+	const cached = searchIndex.get(item);
+	// Arrays compare by identity (they are replaced wholesale when details load);
+	// the scalars compare by value since they are patched in place.
+	if (
+		cached &&
+		cached.barcodes === barcodes &&
+		cached.serials === serials &&
+		cached.batches === batches &&
+		cached.item_code === item.item_code &&
+		cached.item_name === item.item_name &&
+		cached.description === item.description &&
+		cached.barcode === item.barcode
+	) {
+		return cached.haystack;
+	}
+
+	const fields = [item.item_code, item.item_name, item.barcode, item.description];
+
+	if (Array.isArray(barcodes)) {
+		barcodes.forEach((entry) => entry?.barcode && fields.push(entry.barcode));
+	} else if (barcodes) {
+		fields.push(String(barcodes));
+	}
+	if (Array.isArray(item.barcodes)) {
+		item.barcodes.forEach((code) => code && fields.push(String(code)));
+	}
+	if (Array.isArray(serials)) {
+		serials.forEach((entry) => entry?.serial_no && fields.push(entry.serial_no));
+	}
+	if (Array.isArray(batches)) {
+		batches.forEach((entry) => entry?.batch_no && fields.push(entry.batch_no));
+	}
+
+	// One joined string rather than an array of fields: `includes()` over a
+	// single buffer beats `some()` over N of them, and there is nothing to
+	// allocate per search term.
+	const haystack = fields.filter(Boolean).join("\u0000").toLowerCase();
+
+	searchIndex.set(item, {
+		barcodes,
+		serials,
+		batches,
+		item_code: item.item_code,
+		item_name: item.item_name,
+		description: item.description,
+		barcode: item.barcode,
+		haystack,
+	});
+	return haystack;
+}
+
 export default {
 	mixins: [format],
 	setup() {
@@ -606,6 +680,9 @@ export default {
 		customer: "",
 		items_view: "list",
 		first_search: "",
+		// What the search box actually shows. Decoupled from `first_search` so a
+		// keystroke paints immediately instead of waiting on the debounce.
+		search_input: "",
 		search_backup: "",
 		// Limit the displayed items to avoid overly large lists
 		itemsPerPage: 50,
@@ -837,31 +914,44 @@ export default {
 				this.scheduleCardMetricsUpdate();
 			});
 		},
-		// Automatically search when the query has at least 3 characters
-		first_search: _.debounce(function (val, oldVal) {
-			if (this.clearingSearch) {
-				return;
-			}
-			const newLen = (val || "").trim().length;
-			const oldLen = (oldVal || "").trim().length;
+		// Two handlers on the same source: an immediate one that keeps the box in
+		// step with programmatic resets (clearSearch, Esc, scanner), and the
+		// debounced one that actually runs the search.
+		first_search: [
+			function (val) {
+				const next = val == null ? "" : String(val);
+				// Compared trimmed so it never fights the user's own trailing space.
+				if (next.trim() !== (this.search_input || "").trim()) {
+					this.search_input = next;
+				}
+			},
 
-			// When limit search is enabled, wait for an explicit Enter key press
-			if (this.usesLimitSearch) {
-				if (oldLen >= 3 && newLen === 0) {
+			// Automatically search when the query has at least 3 characters
+			_.debounce(function (val, oldVal) {
+				if (this.clearingSearch) {
+					return;
+				}
+				const newLen = (val || "").trim().length;
+				const oldLen = (oldVal || "").trim().length;
+
+				// When limit search is enabled, wait for an explicit Enter key press
+				if (this.usesLimitSearch) {
+					if (oldLen >= 3 && newLen === 0) {
+						// Reset items only when search is fully cleared
+						this.clearSearch();
+					}
+					return;
+				}
+
+				if (newLen >= 3) {
+					// Call without arguments so search_onchange treats it like an Enter key
+					this.search_onchange();
+				} else if (oldLen >= 3 && newLen === 0) {
 					// Reset items only when search is fully cleared
 					this.clearSearch();
 				}
-				return;
-			}
-
-			if (newLen >= 3) {
-				// Call without arguments so search_onchange treats it like an Enter key
-				this.search_onchange();
-			} else if (oldLen >= 3 && newLen === 0) {
-				// Reset items only when search is fully cleared
-				this.clearSearch();
-			}
-		}, 300),
+			}, 300),
+		],
 
 		// Refresh item prices whenever the user changes currency
 		selected_currency() {
@@ -1616,9 +1706,7 @@ export default {
 			this.pendingItemSearch = null;
 			if (pendingSearch) {
 				this.search_onchange(pendingSearch);
-				if (this.search_onchange.flush) {
-					this.search_onchange.flush();
-				}
+				this._debouncedSearchOnchange?.flush?.();
 				return;
 			}
 
@@ -1744,10 +1832,14 @@ export default {
 			);
 
 			// Handle both old boolean format and new object format for backward compatibility
-			const isValid = typeof validationResult === "boolean" ? validationResult : validationResult.isValid;
-			const finalQty = validationResult && typeof validationResult === "object" && validationResult.adjustedQty !== undefined
-				? validationResult.adjustedQty
-				: requestedQty;
+			const isValid =
+				typeof validationResult === "boolean" ? validationResult : validationResult.isValid;
+			const finalQty =
+				validationResult &&
+				typeof validationResult === "object" &&
+				validationResult.adjustedQty !== undefined
+					? validationResult.adjustedQty
+					: requestedQty;
 
 			if (!isValid) {
 				// Validation failed, error message already shown by validator
@@ -1755,7 +1847,12 @@ export default {
 			}
 
 			// Show notification if quantity was auto-adjusted due to insufficient stock
-			if (validationResult && typeof validationResult === "object" && validationResult.adjustedQty !== undefined && requestedQty !== finalQty) {
+			if (
+				validationResult &&
+				typeof validationResult === "object" &&
+				validationResult.adjustedQty !== undefined &&
+				requestedQty !== finalQty
+			) {
 				this.eventBus.emit("show_message", {
 					title: __("{0} has only {1} in stock. Quantity adjusted to {1}.", [
 						item.item_name || item.item_code,
@@ -2069,6 +2166,40 @@ export default {
 			}
 			return scal_qty;
 		},
+		/**
+		 * Defer the expensive part of a search (local re-filter + server lookup)
+		 * without deferring the visible echo of the keystroke.
+		 *
+		 * The debounced function is created per instance rather than in the
+		 * options object, so two selectors could never share one timer.
+		 */
+		queueSearchQuery(value) {
+			if (!this._queueSearchQuery) {
+				this._queueSearchQuery = _.debounce((pending) => {
+					this.first_search = (pending || "").trim();
+				}, SEARCH_QUERY_DEBOUNCE_MS);
+			}
+			this._queueSearchQuery(value);
+		},
+
+		flushSearchQuery() {
+			this._queueSearchQuery?.flush();
+		},
+
+		/**
+		 * Enter is an explicit commit, so nothing should wait on a timer. This
+		 * matters most for hardware scanners, which emit the whole barcode plus
+		 * a Return in a few milliseconds; the debounce alone used to add most of
+		 * a second to every scan.
+		 */
+		enterSearch(event) {
+			this.flushSearchQuery();
+			this.search_onchange(event);
+			// Lodash records `this` and the arguments from the call above, so
+			// flushing here runs it immediately with the right context.
+			this._debouncedSearchOnchange?.flush?.();
+		},
+
 		get_search(first_search) {
 			if (!first_search) return "";
 			const prefix_len = this.pos_profile.posa_scale_barcode_start?.length || 0;
@@ -2080,6 +2211,7 @@ export default {
 			return first_search.substr(0, prefix_len + item_code_len);
 		},
 		esc_event() {
+			this._queueSearchQuery?.cancel();
 			this.search = null;
 			this.first_search = null;
 			this.search_backup = null;
@@ -2441,6 +2573,10 @@ export default {
 			if (this.clearingSearch) {
 				return;
 			}
+
+			// Drop any keystroke still waiting on the debounce, or it would land
+			// after the reset and put the query straight back.
+			this._queueSearchQuery?.cancel();
 
 			const hadQuery = Boolean(
 				(this.first_search && this.first_search.trim()) || (this.search && this.search.trim()),
@@ -3354,41 +3490,37 @@ export default {
 		headers() {
 			return this.getItemsHeaders();
 		},
-		cardColumns() {
-			if (this.windowWidth <= 768) {
-				return 1;
-			}
-			if (this.windowWidth <= 1200) {
-				return 2;
-			}
-			return 3;
-		},
 		cardGap() {
-			if (this.windowWidth <= 768) {
-				return 10;
-			}
-			if (this.windowWidth <= 1200) {
-				return 12;
-			}
-			return 16;
+			return this.isCompact ? 10 : 14;
 		},
 		cardPadding() {
-			if (this.windowWidth <= 768) {
-				return 10;
-			}
-			if (this.windowWidth <= 1200) {
-				return 12;
-			}
-			return 16;
+			return this.isCompact ? 10 : 14;
+		},
+		/** Smallest tile that still shows a full item name and price. */
+		cardTargetWidth() {
+			return this.isCompact ? 172 : 208;
+		},
+		/**
+		 * Column count follows the *pane*, not the window.
+		 *
+		 * Keying off `windowWidth` meant a 1440px desktop always got three
+		 * columns even though the selector pane is only ~45% of that, so tiles
+		 * were cramped on wide screens and needlessly huge on a phone (one
+		 * column). Measuring the container makes the grid adapt to whichever
+		 * layout it happens to be in — split pane, full width, or sheet.
+		 */
+		cardColumns() {
+			const measured = this.cardContainerWidth;
+			// Before the first measurement, estimate from the layout we are in.
+			const width = measured || (this.isCompact ? this.windowWidth - 32 : this.windowWidth * 0.44);
+			const usable = Math.max(0, width - this.cardPadding * 2 + this.cardGap);
+			const columns = Math.floor(usable / (this.cardTargetWidth + this.cardGap));
+			return Math.min(6, Math.max(1, columns));
 		},
 		cardRowHeight() {
-			if (this.windowWidth <= 768) {
-				return 220;
-			}
-			if (this.windowWidth <= 1200) {
-				return 240;
-			}
-			return 260;
+			// Fixed 120px media box plus the text block; the card stretches to
+			// fill the cell so every row lines up exactly with this number.
+			return this.isCompact ? 224 : 244;
 		},
 		cardColumnWidth() {
 			const columns = Math.max(1, this.cardColumns);
@@ -3401,7 +3533,9 @@ export default {
 			const paddingTotal = this.cardPadding * 2;
 			const available = Math.max(0, containerWidth - gapTotal - paddingTotal);
 			const width = Math.floor(available / columns);
-			return Math.max(180, width);
+			// Floor matches the narrowest tile target so a compact two-column
+			// grid is not silently widened back into one column.
+			return Math.max(150, width);
 		},
 		displayedItems() {
 			const baseItems = Array.isArray(this.filteredItems) ? [...this.filteredItems] : [];
@@ -3417,39 +3551,17 @@ export default {
 			if (searchTerm.length >= 3) {
 				const searchTerms = Array.from(new Set(searchTerm.split(/\s+/).filter(Boolean)));
 
-				filteredItems = filteredItems.filter((item) => {
-					const barcodeList = [];
-					if (Array.isArray(item.item_barcode)) {
-						barcodeList.push(...item.item_barcode.map((b) => b.barcode).filter(Boolean));
-					} else if (item.item_barcode) {
-						barcodeList.push(String(item.item_barcode));
-					}
-					if (Array.isArray(item.barcodes)) {
-						barcodeList.push(...item.barcodes.map((b) => String(b)).filter(Boolean));
-					}
+				if (searchTerms.length) {
+					const options = {
+						includeSerials: !!this.pos_profile?.posa_search_serial_no,
+						includeBatches: !!this.pos_profile?.posa_search_batch_no,
+					};
 
-					const searchFields = [
-						item.item_code,
-						item.item_name,
-						item.barcode,
-						item.description,
-						...barcodeList,
-						...(this.pos_profile?.posa_search_serial_no && Array.isArray(item.serial_no_data)
-							? item.serial_no_data.map((s) => s.serial_no)
-							: []),
-						...(this.pos_profile?.posa_search_batch_no && Array.isArray(item.batch_no_data)
-							? item.batch_no_data.map((b) => b.batch_no)
-							: []),
-					]
-						.filter(Boolean)
-						.map((field) => field.toLowerCase());
-
-					if (!searchTerms.length) {
-						return true;
-					}
-
-					return searchTerms.every((term) => searchFields.some((field) => field.includes(term)));
-				});
+					filteredItems = filteredItems.filter((item) => {
+						const haystack = getSearchHaystack(item, options);
+						return searchTerms.every((term) => haystack.includes(term));
+					});
+				}
 			}
 
 			// Apply item group filter
@@ -3485,11 +3597,22 @@ export default {
 		},
 		debounce_search: {
 			get() {
-				return this.first_search;
+				return this.search_input;
 			},
-			set: _.debounce(function (newValue) {
-				this.first_search = (newValue || "").trim();
-			}, 200),
+			/**
+			 * Write-through, then debounce.
+			 *
+			 * The setter used to be debounced itself, which meant the field kept
+			 * re-rendering with the previous value for 200ms after every key —
+			 * fast typing (and every hardware barcode scanner, which "types" a
+			 * whole code in a few milliseconds) lost characters and the caret
+			 * jumped. The visible value is now updated synchronously and only
+			 * the expensive query is deferred.
+			 */
+			set(newValue) {
+				this.search_input = newValue == null ? "" : newValue;
+				this.queueSearchQuery(this.search_input);
+			},
 		},
 		debounce_qty: {
 			get() {
@@ -3515,6 +3638,13 @@ export default {
 
 	async created() {
 		console.log("ItemsSelector created - starting initialization with Pinia store");
+
+		// Vue installs every method as `handler.bind(instance)`, and
+		// Function.prototype.bind does not copy own properties — so the lodash
+		// `.flush()` / `.cancel()` handles are missing from `this.search_onchange`
+		// and every guarded call to them has silently been a no-op. Hold on to the
+		// unbound debounced function, which is what actually owns the timer.
+		this._debouncedSearchOnchange = this.$options.methods.search_onchange;
 
 		// Initialize the Pinia store with existing POS profile data
 		if (this.pos_profile && this.pos_profile.name) {
@@ -3595,14 +3725,14 @@ export default {
 			this.couponsCount = data.couponsCount;
 			this.appliedCouponsCount = data.appliedCouponsCount;
 		});
-                this.eventBus.on("update_customer_price_list", (data) => {
-                        const fallback = this.pos_profile?.selling_price_list || null;
-                        if (data === null || data === undefined) {
-                                this.customer_price_list = fallback;
-                                return;
-                        }
-                        this.customer_price_list = data;
-                });
+		this.eventBus.on("update_customer_price_list", (data) => {
+			const fallback = this.pos_profile?.selling_price_list || null;
+			if (data === null || data === undefined) {
+				this.customer_price_list = fallback;
+				return;
+			}
+			this.customer_price_list = data;
+		});
 		this.eventBus.on("focus_item_search", () => {
 			this.focusItemSearch();
 		});
@@ -3740,6 +3870,7 @@ export default {
 	},
 
 	beforeUnmount() {
+		this._queueSearchQuery?.cancel();
 		// Clear interval when component is destroyed
 		if (this.refresh_interval) {
 			clearInterval(this.refresh_interval);
@@ -4063,7 +4194,9 @@ export default {
 	cursor: pointer;
 	display: flex;
 	flex-direction: column;
-	height: auto;
+	/* Fill the cell the virtual scroller sized for us, so `cardRowHeight` and
+	   the rendered height can never drift apart. */
+	height: 100%;
 	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
 	will-change: transform;
 	backface-visibility: hidden;
