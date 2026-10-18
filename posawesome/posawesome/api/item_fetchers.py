@@ -11,6 +11,8 @@ from erpnext.stock.doctype.batch.batch import get_batch_qty
 from frappe.utils import flt, nowdate
 from frappe.utils.caching import redis_cache
 
+from posawesome.posawesome.compat import aggregate_field
+
 
 def _resolve_cache_ttl(ttl: Optional[int]) -> int:
     """Return a numeric TTL value while falling back to the default window."""
@@ -138,7 +140,7 @@ def _fetch_bin_qty(warehouse: str, item_codes: Tuple[str, ...]):
             return []
         return frappe.get_all(
             "Bin",
-            fields=["item_code", "sum(actual_qty) as actual_qty"],
+            fields=["item_code", aggregate_field("sum", "actual_qty", "actual_qty")],
             filters={
                 "warehouse": ["in", warehouses],
                 "item_code": ["in", item_codes],

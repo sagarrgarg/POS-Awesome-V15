@@ -38,6 +38,25 @@ def get_base_value(doc, fieldname, base_fieldname=None, conversion_rate=None):
     return flt(value) * flt(conversion_rate or 1)
 
 
+def _can_link_closing_shift(doctype):
+    """Return True if ``doctype.pos_closing_entry`` may hold a POS Closing Shift name.
+
+    ERPNext v16 added a standard Sales Invoice ``pos_closing_entry`` Link to
+    "POS Closing Entry"; a shift name there is an invalid link that breaks later
+    saves/amends, so that field is left to ERPNext. A custom field or bare column
+    of that name (the only kind v15 can have) keeps the old behaviour.
+    """
+    if not frappe.db.has_column(doctype, "pos_closing_entry"):
+        return False
+    df = frappe.get_meta(doctype).get_field("pos_closing_entry")
+    return not (
+        df
+        and not getattr(df, "is_custom_field", False)
+        and df.fieldtype == "Link"
+        and df.options != "POS Closing Shift"
+    )
+
+
 class POSClosingShift(Document):
     def validate(self):
         user = frappe.get_all(
@@ -132,7 +151,7 @@ class POSClosingShift(Document):
             if not invoice:
                 continue
             doctype = "Sales Invoice" if d.get("sales_invoice") else "POS Invoice"
-            if frappe.db.has_column(doctype, "pos_closing_entry"):
+            if _can_link_closing_shift(doctype):
                 frappe.db.set_value(doctype, invoice, "pos_closing_entry", self.name)
 
     def _clear_closing_entry_invoices(self):
@@ -142,7 +161,7 @@ class POSClosingShift(Document):
             pos_invoice = d.get("pos_invoice")
             sales_invoice = d.get("sales_invoice")
             if pos_invoice:
-                if frappe.db.has_column("POS Invoice", "pos_closing_entry"):
+                if _can_link_closing_shift("POS Invoice"):
                     frappe.db.set_value("POS Invoice", pos_invoice, "pos_closing_entry", None)
 
                 merge_logs = frappe.get_all(
@@ -171,7 +190,7 @@ class POSClosingShift(Document):
                     pos_doc.set_status(update=True)
 
             if sales_invoice:
-                if frappe.db.has_column("Sales Invoice", "pos_closing_entry"):
+                if _can_link_closing_shift("Sales Invoice"):
                     frappe.db.set_value("Sales Invoice", sales_invoice, "pos_closing_entry", None)
                 if self._is_consolidated_sales_invoice(sales_invoice):
                     consolidated_sales_invoices.add(sales_invoice)

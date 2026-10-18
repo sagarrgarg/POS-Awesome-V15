@@ -31,6 +31,7 @@ from posawesome.posawesome.api.utilities import (
     ensure_child_doctype,
     set_batch_nos_for_bundels,
 )  # Updated imports
+from posawesome.posawesome.compat import aggregate_field
 
 from .items import get_stock_availability
 
@@ -850,7 +851,7 @@ def search_invoices_for_return(
     total_count_query = frappe.get_list(
         doctype,
         filters=filters,
-        fields=["count(name) as total_count"],
+        fields=[aggregate_field("count", "name", "total_count")],
         as_list=False,
     )
     total_count = total_count_query[0].total_count if total_count_query else 0

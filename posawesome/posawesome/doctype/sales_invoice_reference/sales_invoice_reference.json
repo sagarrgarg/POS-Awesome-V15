@@ -11,7 +11,9 @@
   "customer",
   "grand_total",
   "transaction_currency",
-  "transaction_amount"
+  "transaction_amount",
+  "is_return",
+  "return_against"
  ],
  "fields": [
   {
@@ -67,11 +69,27 @@
    "label": "Invoice Amount",
    "options": "transaction_currency",
    "read_only": 1
+  },
+  {
+   "default": "0",
+   "fetch_from": "sales_invoice.is_return",
+   "fieldname": "is_return",
+   "fieldtype": "Check",
+   "label": "Is Return",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "sales_invoice.return_against",
+   "fieldname": "return_against",
+   "fieldtype": "Link",
+   "label": "Return Against",
+   "options": "Sales Invoice",
+   "read_only": 1
   }
  ],
  "istable": 1,
  "links": [],
- "modified": "2025-09-30 11:32:16.626299",
+ "modified": "2026-10-18 05:00:00.000000",
  "modified_by": "Administrator",
  "module": "POSAwesome",
  "name": "Sales Invoice Reference",

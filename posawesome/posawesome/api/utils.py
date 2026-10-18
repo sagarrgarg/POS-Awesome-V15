@@ -74,7 +74,8 @@ def get_default_warehouse(company=None):
     if not company:
         return None
     warehouse = frappe.db.get_value("Company", company, "default_warehouse")
-    if not warehouse:
+    if not warehouse and frappe.get_meta("Stock Settings").has_field("default_warehouse"):
+        # ERPNext v16 keeps this setting only on Company (read above).
         warehouse = frappe.db.get_single_value("Stock Settings", "default_warehouse")
     return warehouse
 

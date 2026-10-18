@@ -17,6 +17,8 @@ from frappe.utils import cstr, flt, get_datetime, nowdate
 from frappe.utils.background_jobs import enqueue
 from frappe.utils.caching import redis_cache
 
+from posawesome.posawesome.compat import aggregate_field
+
 from .item_fetchers import ItemDetailAggregator
 from .utils import (
     HAS_VARIANTS_EXCLUSION,
@@ -141,7 +143,7 @@ def get_stock_availability(item_code, warehouse):
 
     rows = frappe.get_all(
         "Bin",
-        fields=["sum(actual_qty) as actual_qty"],
+        fields=[aggregate_field("sum", "actual_qty", "actual_qty")],
         filters={"item_code": item_code, "warehouse": ["in", warehouses]},
     )
 
