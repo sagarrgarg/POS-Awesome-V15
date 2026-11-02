@@ -2443,7 +2443,18 @@ export default {
 			updateLocalStockCache(affected);
 			saveItemDetailsCache(this.pos_profile.name, this.active_price_list, affected);
 
-			if (isOffline()) return;
+			// A POS Invoice moves no Bin qty until the closing entry consolidates it,
+			// so a live read now would put the pre-sale quantity back on the card.
+			if (isOffline() || doctype === "POS Invoice") return;
+
+			// Bills of the same item can overlap; only the newest one's live read
+			// may land, or an older reply would show stock that is already sold.
+			this._stockRefreshSeq = (this._stockRefreshSeq || 0) + 1;
+			const seq = this._stockRefreshSeq;
+			this._stockRefreshSeqByItem = this._stockRefreshSeqByItem || {};
+			affected.forEach((item) => {
+				this._stockRefreshSeqByItem[item.item_code] = seq;
+			});
 
 			// A background-job submit returns before stock is posted; reading
 			// earlier would put the pre-sale quantity back on the card.
@@ -2463,7 +2474,9 @@ export default {
 					},
 					freeze: false,
 				});
-				const details = (r && r.message) || [];
+				const details = ((r && r.message) || []).filter(
+					(det) => this._stockRefreshSeqByItem[det.item_code] === seq,
+				);
 				details.forEach((det) => {
 					affected
 						.filter((item) => item.item_code === det.item_code)

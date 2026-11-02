@@ -8,12 +8,13 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import frappe
 from erpnext.stock.doctype.batch.batch import (
+    get_available_batches,
     get_batch_no,
     get_batch_qty,
 )
 from erpnext.stock.get_item_details import get_item_details
 from frappe import _, as_json
-from frappe.utils import cstr, flt, get_datetime, nowdate
+from frappe.utils import cstr, flt, get_datetime, now_datetime, nowdate
 from frappe.utils.background_jobs import enqueue
 from frappe.utils.caching import redis_cache
 
@@ -187,6 +188,69 @@ def get_available_qty(items):
         )
 
     return result
+
+
+@frappe.whitelist()
+def get_fifo_batch_allocation(item_code, warehouse, qty):
+    """Return the batches that will be consumed for ``qty`` of a batched item.
+
+    Calls the same picker, with the same arguments, that ERPNext uses when it
+    auto-creates an outward Serial and Batch Bundle for a row with no batch, so
+    the split shown in the POS is the split the bundle gets on submit.
+
+    Returns:
+        dict: ``batches`` (batch_no, qty taken, available_qty, expiry_date) in
+        pick order, plus ``required`` and ``allocated`` in stock UOM.
+    """
+
+    qty = flt(qty)
+    if not item_code or not warehouse or qty <= 0:
+        return {"batches": [], "required": qty, "allocated": 0}
+
+    _check_pos_warehouse_access(warehouse)
+
+    picked = get_available_batches(
+        frappe._dict(
+            {
+                "item_code": item_code,
+                "warehouse": warehouse,
+                "qty": qty,
+                "based_on": frappe.db.get_single_value("Stock Settings", "pick_serial_and_batch_based_on"),
+                "posting_datetime": now_datetime(),
+            }
+        )
+    )
+
+    # one lookup for every batch's stock and expiry instead of one per picked batch
+    stock = {b.get("batch_no"): b for b in get_batch_qty(item_code=item_code, warehouse=warehouse) or []}
+    batches = []
+    for batch_no, taken in picked.items():
+        batches.append(
+            {
+                "batch_no": batch_no,
+                "qty": flt(taken),
+                "available_qty": flt(stock.get(batch_no, {}).get("qty")),
+                "expiry_date": stock.get(batch_no, {}).get("expiry_date"),
+            }
+        )
+
+    return {
+        "batches": batches,
+        "required": qty,
+        "allocated": sum(b["qty"] for b in batches),
+    }
+
+
+def _check_pos_warehouse_access(warehouse):
+    """Allow stock lookups only for a warehouse of a POS Profile the user is assigned to."""
+
+    if "System Manager" in frappe.get_roles():
+        return
+    profiles = frappe.get_all("POS Profile User", filters={"user": frappe.session.user}, pluck="parent")
+    if not profiles or not frappe.db.exists(
+        "POS Profile", {"name": ["in", profiles], "warehouse": warehouse, "disabled": 0}
+    ):
+        frappe.throw(_("Not permitted to view stock of warehouse {0}").format(warehouse), frappe.PermissionError)
 
 
 @frappe.whitelist()

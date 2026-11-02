@@ -367,6 +367,8 @@ export default {
 						item.posa_row_id = this.makeid(20);
 					}
 					if (item.batch_no) {
+						// a batch saved on the invoice is kept while it covers the qty
+						item._batch_manual = true;
 						this.set_batch_qty(item, item.batch_no);
 					}
 					if (!item.original_item_name) {
@@ -509,6 +511,8 @@ export default {
 					item.posa_row_id = this.makeid(20);
 				}
 				if (item.batch_no) {
+					// a batch saved on the order is kept while it covers the qty
+					item._batch_manual = true;
 					this.set_batch_qty(item, item.batch_no);
 				}
 			});
@@ -2544,7 +2548,9 @@ export default {
 		if (flt(item.qty) === 0) {
 			this.remove_item(item);
 			this.$forceUpdate();
+			return;
 		}
+		this.update_batch_bundle_plan(item);
 	},
 
 	// Update quantity limits based on available stock (simplified - validation handled centrally)
@@ -2616,7 +2622,92 @@ export default {
 
 	// Set batch number for an item (and update batch data)
 	set_batch_qty(item, value, update = true) {
-		return setBatchQty(item, value, update, this);
+		const result = setBatchQty(item, value, update, this);
+		this.update_batch_bundle_plan(item);
+		return result;
+	},
+
+	// Pick a batched row's batches with the picker ERPNext uses for its outward
+	// Serial and Batch Bundle, so what the cashier sees is what gets posted. One
+	// batch is set on the row; several are shown as a bundle and the row's batch
+	// is cleared so the server builds the bundle. With Auto Set Batch every row is
+	// picked this way (POS's own pick prefers batches with an expiry date, not
+	// FIFO); a batch the cashier chose by hand is kept while it covers the qty.
+	async update_batch_bundle_plan(item) {
+		if (!item || !item.has_batch_no || item.has_serial_no) return;
+
+		// Every call supersedes a request still in flight for this row, including
+		// calls that return early, so a late reply cannot undo a newer choice.
+		const token = (item._batchBundleToken || 0) + 1;
+		item._batchBundleToken = token;
+
+		const required = Math.abs(flt(item.stock_qty ?? flt(item.qty) * flt(item.conversion_factor || 1)));
+		const isReturn = flt(item.qty) < 0 || this.invoiceType === "Return";
+		// A POS Invoice posts no stock on submit, so ERPNext builds it no bundle.
+		const posInvoice = !!this.pos_profile.create_pos_invoice_instead_of_sales_invoice;
+		const autoPick = this.pos_profile.posa_auto_set_batch && !item._batch_manual;
+		const batchCovers = item.batch_no && required <= flt(item.actual_batch_qty);
+		if (isReturn || posInvoice || !required || (batchCovers && !autoPick) || isOffline()) {
+			item.batch_bundle = null;
+			item.batch_bundle_shortfall = 0;
+			return;
+		}
+
+		// Let rapid qty clicks settle; a newer call takes over from this one.
+		await new Promise((resolve) => setTimeout(resolve, 250));
+		if (item._batchBundleToken !== token) return;
+
+		let plan;
+		try {
+			const r = await frappe.call({
+				method: "posawesome.posawesome.api.items.get_fifo_batch_allocation",
+				args: {
+					item_code: item.item_code,
+					// Rows go to the server without a warehouse and are posted from the
+					// profile's; item.warehouse can hold the item's default instead.
+					warehouse: this.pos_profile.warehouse,
+					qty: required,
+				},
+			});
+			plan = r && r.message;
+		} catch (error) {
+			console.error("Failed to fetch FIFO batch allocation", error);
+			return;
+		}
+		if (item._batchBundleToken !== token || !plan) return;
+
+		const batches = plan.batches || [];
+		const shortfall = Math.max(0, flt(plan.required) - flt(plan.allocated));
+		item.batch_bundle_shortfall = shortfall;
+
+		// One batch covers it: no bundle. All batches together fall short: ERPNext
+		// will not build a bundle either, so the row keeps a single batch as before
+		// (the server does the same) and the cashier only gets the warning.
+		if (batches.length <= 1 || shortfall > 0) {
+			item.batch_bundle = null;
+			const first = batches.length ? batches[0].batch_no : null;
+			const target = shortfall > 0 ? item.batch_no || first : first;
+			if (target && item.batch_no !== target) {
+				this._set_row_batch(item, batches.find((b) => b.batch_no === target) || { batch_no: target });
+			}
+			return;
+		}
+
+		item.batch_no = null;
+		item.actual_batch_qty = plan.allocated;
+		item.batch_no_expiry_date = null;
+		item.batch_bundle = batches;
+	},
+
+	_set_row_batch(item, batch) {
+		setBatchQty(item, batch.batch_no, false, this);
+		// setBatchQty falls back to another batch when this one is missing from the
+		// row's batch list (filtered by other rows); the server's pick wins.
+		if (item.batch_no !== batch.batch_no) {
+			item.batch_no = batch.batch_no;
+			item.actual_batch_qty = batch.available_qty;
+			item.batch_no_expiry_date = batch.expiry_date || null;
+		}
 	},
 
 	change_price_list_rate(item) {
