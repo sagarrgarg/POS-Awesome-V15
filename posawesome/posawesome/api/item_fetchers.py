@@ -36,12 +36,9 @@ def _normalize_codes(codes: Iterable[str]) -> Tuple[str, ...]:
 
 
 _price_cache: Dict[int, Callable[..., Any]] = {}
-_bin_cache: Dict[int, Callable[..., Any]] = {}
 _meta_cache: Dict[int, Callable[..., Any]] = {}
 _barcode_cache: Dict[int, Callable[..., Any]] = {}
 _uom_cache: Dict[int, Callable[..., Any]] = {}
-_batch_cache: Dict[int, Callable[..., Any]] = {}
-_serial_cache: Dict[int, Callable[..., Any]] = {}
 
 
 def _fetch_item_prices(
@@ -154,10 +151,14 @@ def _fetch_bin_qty(warehouse: str, item_codes: Tuple[str, ...]):
 
 
 def get_bin_qty(warehouse: Optional[str], item_codes: Sequence[str], ttl: Optional[int] = None):
-    """Return cached Bin quantities when a warehouse and codes are provided."""
+    """Return live Bin quantities when a warehouse and codes are provided.
 
-    cached = _cache_wrapper(_bin_cache, ttl, _fetch_bin_qty)
-    return cached(warehouse, tuple(item_codes))
+    Stock changes with every sale, so it is never cached: a cached copy kept
+    showing pre-sale quantities for the whole TTL. ``ttl`` is accepted only so
+    callers can pass the same arguments to every fetcher.
+    """
+
+    return _fetch_bin_qty(warehouse, tuple(item_codes))
 
 
 def _fetch_item_meta(item_codes: Tuple[str, ...]):
@@ -244,10 +245,12 @@ def _fetch_batches(warehouse: str, item_codes: Tuple[str, ...]):
 
 
 def get_batches(warehouse: Optional[str], item_codes: Sequence[str], ttl: Optional[int] = None):
-    """Fetch batch availability constrained to the provided warehouse."""
+    """Fetch live batch availability constrained to the provided warehouse.
 
-    cached = _cache_wrapper(_batch_cache, ttl, _fetch_batches)
-    return cached(warehouse, tuple(item_codes))
+    Not cached for the same reason as :func:`get_bin_qty`.
+    """
+
+    return _fetch_batches(warehouse, tuple(item_codes))
 
 
 def _fetch_serials(warehouse: str, item_codes: Tuple[str, ...]):
@@ -267,10 +270,12 @@ def _fetch_serials(warehouse: str, item_codes: Tuple[str, ...]):
 
 
 def get_serials(warehouse: Optional[str], item_codes: Sequence[str], ttl: Optional[int] = None):
-    """Fetch serial number data while honouring the redis cache TTL."""
+    """Fetch live serial number availability scoped to a warehouse.
 
-    cached = _cache_wrapper(_serial_cache, ttl, _fetch_serials)
-    return cached(warehouse, tuple(item_codes))
+    Not cached for the same reason as :func:`get_bin_qty`.
+    """
+
+    return _fetch_serials(warehouse, tuple(item_codes))
 
 
 @dataclass(frozen=True)

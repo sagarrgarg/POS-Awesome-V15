@@ -12,6 +12,7 @@
 			color="primary"
 			:label="frappe._('Customer')"
 			v-model="internalCustomer"
+			v-model:search="customerSearch"
 			:items="customerItems"
 			item-title="customer_name"
 			item-value="name"
@@ -171,6 +172,9 @@ export default {
 		} = storeToRefs(customersStore);
 
 		const internalCustomer = ref(null);
+		// Vuetify copies the picked customer's name into the search text and only
+		// clears it on focus change, so it is held here to clear on reset.
+		const customerSearch = ref("");
 		const tempSelectedCustomer = ref(null);
 		const isMenuOpen = ref(false);
 		const customerDropdown = ref(null);
@@ -216,6 +220,9 @@ export default {
 			(value) => {
 				if (!isMenuOpen.value) {
 					internalCustomer.value = value || null;
+					if (!value) {
+						customerSearch.value = "";
+					}
 				}
 			},
 			{ immediate: true },
@@ -407,6 +414,7 @@ export default {
 			loadingCustomers,
 			isCustomerBackgroundLoading,
 			internalCustomer,
+			customerSearch,
 			effectiveReadonly,
 			onCustomerMenuToggle,
 			onCustomerChange,

@@ -1545,6 +1545,23 @@ export default {
 					// Update local stock quantities immediately after successful
 					// invoice submission so item availability reflects changes
 					updateLocalStock(vm.invoice_doc.items || []);
+					// Let the item list pull fresh stock for what was just sold.
+					// Orders and quotations move no stock, so they are skipped.
+					// status is 0 when the profile submits in a background job.
+					const isOrder = vm.invoiceType === "Order" && vm.pos_profile.posa_create_only_sales_order;
+					if (!isOrder && vm.invoiceType !== "Quotation") {
+						vm.eventBus.emit("invoice_submitted", {
+							name: r.message.name,
+							doctype: vm.pos_profile.create_pos_invoice_instead_of_sales_invoice
+								? "POS Invoice"
+								: "Sales Invoice",
+							docstatus: r.message.status,
+							items: (vm.invoice_doc.items || []).map((item) => ({
+								item_code: item.item_code,
+								stock_qty: item.stock_qty ?? (item.qty || 0) * (item.conversion_factor || 1),
+							})),
+						});
+					}
 					vm.addresses = [];
 					vm.eventBus.emit("clear_invoice");
 					vm.eventBus.emit("focus_item_search");
