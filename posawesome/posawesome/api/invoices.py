@@ -190,6 +190,100 @@ def _auto_set_return_batches(invoice_doc):
                 frappe.throw(_("No batches available in {0} for {1}.").format(d.warehouse, d.item_code))
 
 
+def _row_stock_qty(d):
+    return flt(d.get("stock_qty")) or flt(d.qty) * flt(d.get("conversion_factor") or 1)
+
+
+def _release_short_batches(invoice_doc):
+    """Clear a sale row's batch when that batch cannot cover what is billed from it.
+
+    With no batch on the row, ERPNext builds the outward Serial and Batch Bundle
+    itself and spreads the qty over batches in FIFO order, instead of failing
+    with a negative batch stock error. Rows sharing a batch are totalled, since
+    each may fit on its own while together they do not.
+
+    Left alone when ERPNext would not build that bundle, since a blank batch then
+    fails with a less clear error or loses a sale the old path allowed:
+    - Stock Settings does not auto-create outward bundles;
+    - the document posts no stock now (POS Invoice, or update_stock off);
+    - all the item's batches together still fall short. ERPNext's auto bundle
+      rejects that outright, while a row that keeps its batch still honours
+      "allow negative stock for batch".
+    """
+
+    if invoice_doc.get("is_return"):
+        return
+    if invoice_doc.doctype != "Sales Invoice" or not cint(invoice_doc.get("update_stock")):
+        return
+    if not frappe.db.get_single_value("Stock Settings", "auto_create_serial_and_batch_bundle_for_outward"):
+        return
+
+    rows_by_batch = {}
+    for d in invoice_doc.items:
+        warehouse = d.get("warehouse") or invoice_doc.get("set_warehouse")
+        if not d.get("batch_no") or not warehouse or d.get("serial_and_batch_bundle") or d.get("serial_no"):
+            continue
+        rows_by_batch.setdefault((d.batch_no, warehouse), []).append(d)
+
+    item_stock = {}
+    for (batch_no, warehouse), rows in rows_by_batch.items():
+        if flt(get_batch_qty(batch_no, warehouse)) >= sum(_row_stock_qty(d) for d in rows):
+            continue
+
+        item_code = rows[0].item_code
+        if (item_code, warehouse) not in item_stock:
+            batches = get_batch_qty(item_code=item_code, warehouse=warehouse) or []
+            item_stock[(item_code, warehouse)] = sum(
+                flt(b.get("qty")) for b in batches if flt(b.get("qty")) > 0
+            )
+        billed = sum(
+            _row_stock_qty(d)
+            for d in invoice_doc.items
+            if d.item_code == item_code
+            and (d.get("warehouse") or invoice_doc.get("set_warehouse")) == warehouse
+        )
+        if item_stock[(item_code, warehouse)] < billed:
+            continue
+
+        for d in rows:
+            d.batch_no = None
+
+
+@frappe.whitelist()
+def get_last_invoice(pos_opening_shift):
+    """Return the latest bill the current user printed in their opening shift.
+
+    The POS kept the last bill only in page memory, so "Print Last Invoice" was
+    disabled after every reload. A bill submitted in a background job is still a
+    draft for a moment, so printed drafts count; cancelled bills do not.
+    """
+
+    shift = frappe.db.get_value("POS Opening Shift", pos_opening_shift, ["user", "pos_profile"], as_dict=True)
+    if not shift or shift.user != frappe.session.user:
+        return None
+
+    doctype = (
+        "POS Invoice"
+        if frappe.db.get_value(
+            "POS Profile", shift.pos_profile, "create_pos_invoice_instead_of_sales_invoice"
+        )
+        else "Sales Invoice"
+    )
+    last = frappe.get_all(
+        doctype,
+        filters={
+            "posa_pos_opening_shift": pos_opening_shift,
+            "owner": frappe.session.user,
+            "docstatus": ["<", 2],
+            "posa_is_printed": 1,
+        },
+        order_by="creation desc",
+        limit=1,
+        pluck="name",
+    )
+    return last[0] if last else None
+
+
 @frappe.whitelist()
 def validate_cart_items(items, pos_profile=None):
     """Validate cart items for available stock.
@@ -597,6 +691,7 @@ def submit_invoice(invoice, data):
     payments = invoice_doc.payments
 
     _auto_set_return_batches(invoice_doc)
+    _release_short_batches(invoice_doc)
 
     # if frappe.get_value("POS Profile", invoice_doc.pos_profile, "posa_auto_set_batch"):
     #     set_batch_nos(invoice_doc, "warehouse", throw=True)

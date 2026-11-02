@@ -2418,6 +2418,94 @@ export default {
 				this.update_items_details(this.displayedItems);
 			}
 		},
+		// Refresh stock for the items on a just-submitted invoice. The sold qty is
+		// taken off locally first so the card changes at once; the live figure
+		// replaces it once the invoice has actually posted its stock entries.
+		async refreshStockAfterInvoice({ name, doctype, docstatus, items } = {}) {
+			if (!Array.isArray(items) || !items.length) return;
+
+			const soldQty = {};
+			items.forEach(({ item_code, stock_qty }) => {
+				if (item_code) {
+					soldQty[item_code] = (soldQty[item_code] || 0) + (Number(stock_qty) || 0);
+				}
+			});
+			const affected = (this.items || []).filter(
+				(item) => item && item.item_code in soldQty && !item.has_variants,
+			);
+			if (!affected.length) return;
+
+			affected.forEach((item) => {
+				item.actual_qty = (Number(item.actual_qty) || 0) - soldQty[item.item_code];
+			});
+			// Other refresh paths read these caches, so they get the new qty too or
+			// they put the pre-sale figure straight back on the card.
+			updateLocalStockCache(affected);
+			saveItemDetailsCache(this.pos_profile.name, this.active_price_list, affected);
+
+			// A POS Invoice moves no Bin qty until the closing entry consolidates it,
+			// so a live read now would put the pre-sale quantity back on the card.
+			if (isOffline() || doctype === "POS Invoice") return;
+
+			// Bills of the same item can overlap; only the newest one's live read
+			// may land, or an older reply would show stock that is already sold.
+			this._stockRefreshSeq = (this._stockRefreshSeq || 0) + 1;
+			const seq = this._stockRefreshSeq;
+			this._stockRefreshSeqByItem = this._stockRefreshSeqByItem || {};
+			affected.forEach((item) => {
+				this._stockRefreshSeqByItem[item.item_code] = seq;
+			});
+
+			// A background-job submit returns before stock is posted; reading
+			// earlier would put the pre-sale quantity back on the card.
+			if (docstatus !== 1 && !(await this.waitForInvoiceSubmit(doctype, name))) {
+				return;
+			}
+
+			try {
+				const r = await frappe.call({
+					method: "posawesome.posawesome.api.items.get_items_details",
+					args: {
+						pos_profile: JSON.stringify(this.pos_profile),
+						items_data: JSON.stringify(
+							affected.map((item) => ({ item_code: item.item_code, uom: item.uom })),
+						),
+						price_list: this.active_price_list,
+					},
+					freeze: false,
+				});
+				const details = ((r && r.message) || []).filter(
+					(det) => this._stockRefreshSeqByItem[det.item_code] === seq,
+				);
+				details.forEach((det) => {
+					affected
+						.filter((item) => item.item_code === det.item_code)
+						.forEach((item) => {
+							const upd = { actual_qty: det.actual_qty };
+							if (det.batch_no_data) upd.batch_no_data = det.batch_no_data;
+							if (det.serial_no_data) upd.serial_no_data = det.serial_no_data;
+							Object.assign(item, upd);
+						});
+				});
+				updateLocalStockCache(details);
+				saveItemDetailsCache(this.pos_profile.name, this.active_price_list, details);
+			} catch (err) {
+				console.error("Failed to refresh stock after invoice submit", err);
+			}
+		},
+		async waitForInvoiceSubmit(doctype, name, attempts = 20) {
+			if (!doctype || !name) return false;
+			for (let i = 0; i < attempts; i++) {
+				await new Promise((resolve) => setTimeout(resolve, 1000));
+				try {
+					const r = await frappe.db.get_value(doctype, name, "docstatus");
+					if (r?.message?.docstatus === 1) return true;
+				} catch (err) {
+					return false;
+				}
+			}
+			return false;
+		},
 		async prePopulateStockCache(items) {
 			if (this.prePopulateInProgress) {
 				return;
@@ -3755,6 +3843,8 @@ export default {
 			}
 		});
 
+		this.eventBus.on("invoice_submitted", this.refreshStockAfterInvoice);
+
 		// Refresh item quantities when connection to server is restored
 		this.eventBus.on("server-online", async () => {
 			if (this.items && this.items.length > 0) {
@@ -3917,6 +4007,7 @@ export default {
 		this.eventBus.off("update_coupons_counters");
 		this.eventBus.off("update_customer_price_list");
 		this.eventBus.off("force_reload_items");
+		this.eventBus.off("invoice_submitted", this.refreshStockAfterInvoice);
 		this.eventBus.off("focus_item_search");
 		window.removeEventListener("resize", this.checkItemContainerOverflow);
 		if (this.metricsRaf) {

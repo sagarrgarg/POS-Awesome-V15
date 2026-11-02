@@ -252,6 +252,7 @@ export default {
 					this.posProfile = data.pos_profile || {};
 					if (navigator.onLine) {
 						this.refreshTaxInclusiveSetting();
+						this.loadLastInvoice(data.pos_opening_shift);
 					}
 				});
 
@@ -337,6 +338,26 @@ export default {
 		handleCloseShift() {
 			// Trigger POS closing dialog via event bus
 			this.eventBus.emit("open_closing_dialog");
+		},
+
+		// Restore "Print Last Invoice" after a reload: the last bill otherwise lives
+		// only in page memory. A bill submitted in this session wins over the reply.
+		async loadLastInvoice(openingShift) {
+			const shiftName = openingShift && (openingShift.name || openingShift);
+			if (!shiftName || this.lastInvoiceId) {
+				return;
+			}
+			try {
+				const r = await frappe.call({
+					method: "posawesome.posawesome.api.invoices.get_last_invoice",
+					args: { pos_opening_shift: shiftName },
+				});
+				if (r.message && !this.lastInvoiceId) {
+					this.lastInvoiceId = r.message;
+				}
+			} catch (error) {
+				console.error("Failed to load last invoice", error);
+			}
 		},
 
 		handlePrintLastInvoice() {

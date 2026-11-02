@@ -362,52 +362,44 @@
 							<template v-slot:item="{ props, item }">
 								<v-list-item v-bind="props">
 									<v-list-item-title class="text-primary text-subtitle-1">
-										<div
-											v-html="
-												(item?.raw && item.raw.address_title) || item.address_title
-											"
-										></div>
+										<div>
+											{{ (item?.raw && item.raw.address_title) || item.address_title }}
+										</div>
 									</v-list-item-title>
 									<v-list-item-subtitle>
-										<div
-											v-html="
-												(item?.raw && item.raw.address_line1) || item.address_line1
-											"
-										></div>
+										<div>
+											{{ (item?.raw && item.raw.address_line1) || item.address_line1 }}
+										</div>
 									</v-list-item-subtitle>
 									<v-list-item-subtitle
 										v-if="(item?.raw && item.raw.address_line2) || item.address_line2"
 									>
-										<div
-											v-html="
-												(item?.raw && item.raw.address_line2) || item.address_line2
-											"
-										></div>
+										<div>
+											{{ (item?.raw && item.raw.address_line2) || item.address_line2 }}
+										</div>
 									</v-list-item-subtitle>
 									<v-list-item-subtitle v-if="(item?.raw && item.raw.city) || item.city">
-										<div v-html="(item?.raw && item.raw.city) || item.city"></div>
+										<div>{{ (item?.raw && item.raw.city) || item.city }}</div>
 									</v-list-item-subtitle>
 									<v-list-item-subtitle v-if="(item?.raw && item.raw.state) || item.state">
-										<div v-html="(item?.raw && item.raw.state) || item.state"></div>
+										<div>{{ (item?.raw && item.raw.state) || item.state }}</div>
 									</v-list-item-subtitle>
 									<v-list-item-subtitle
 										v-if="(item?.raw && item.raw.country) || item.country"
 									>
-										<div v-html="(item?.raw && item.raw.country) || item.country"></div>
+										<div>{{ (item?.raw && item.raw.country) || item.country }}</div>
 									</v-list-item-subtitle>
 									<v-list-item-subtitle
 										v-if="(item?.raw && item.raw.mobile_no) || item.mobile_no"
 									>
-										<div
-											v-html="(item?.raw && item.raw.mobile_no) || item.mobile_no"
-										></div>
+										<div>{{ (item?.raw && item.raw.mobile_no) || item.mobile_no }}</div>
 									</v-list-item-subtitle>
 									<v-list-item-subtitle
 										v-if="(item?.raw && item.raw.address_type) || item.address_type"
 									>
-										<div
-											v-html="(item?.raw && item.raw.address_type) || item.address_type"
-										></div>
+										<div>
+											{{ (item?.raw && item.raw.address_type) || item.address_type }}
+										</div>
 									</v-list-item-subtitle>
 								</v-list-item>
 							</template>
@@ -1545,6 +1537,23 @@ export default {
 					// Update local stock quantities immediately after successful
 					// invoice submission so item availability reflects changes
 					updateLocalStock(vm.invoice_doc.items || []);
+					// Let the item list pull fresh stock for what was just sold.
+					// Orders and quotations move no stock, so they are skipped.
+					// status is 0 when the profile submits in a background job.
+					const isOrder = vm.invoiceType === "Order" && vm.pos_profile.posa_create_only_sales_order;
+					if (!isOrder && vm.invoiceType !== "Quotation") {
+						vm.eventBus.emit("invoice_submitted", {
+							name: r.message.name,
+							doctype: vm.pos_profile.create_pos_invoice_instead_of_sales_invoice
+								? "POS Invoice"
+								: "Sales Invoice",
+							docstatus: r.message.status,
+							items: (vm.invoice_doc.items || []).map((item) => ({
+								item_code: item.item_code,
+								stock_qty: item.stock_qty ?? (item.qty || 0) * (item.conversion_factor || 1),
+							})),
+						});
+					}
 					vm.addresses = [];
 					vm.eventBus.emit("clear_invoice");
 					vm.eventBus.emit("focus_item_search");

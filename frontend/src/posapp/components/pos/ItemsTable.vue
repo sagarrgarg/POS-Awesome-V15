@@ -37,6 +37,19 @@
 					<v-chip v-if="item.is_bundle" color="secondary" size="x-small" class="ml-1">
 						{{ __("Bundle") }}
 					</v-chip>
+					<v-chip
+						v-if="item.batch_bundle && item.batch_bundle.length"
+						color="info"
+						size="x-small"
+						class="ml-1 flex-shrink-0"
+						:title="
+							__('Serial and Batch Bundle (FIFO)') +
+							'\n' +
+							item.batch_bundle.map((b) => `${b.batch_no}: ${formatFloat(b.qty)}`).join('\n')
+						"
+					>
+						{{ __("{0} Batches", [item.batch_bundle.length]) }}
+					</v-chip>
 					<v-chip v-if="item.name_overridden" color="primary" size="x-small" class="ml-1">
 						{{ __("Edited") }}
 					</v-chip>
@@ -573,23 +586,75 @@
 											color="primary"
 											class="pos-themed-input"
 											:label="frappe._('Batch No')"
-											@update:model-value="setBatchQty(item, $event)"
+											@update:model-value="
+												item._batch_manual = !!$event;
+												setBatchQty(item, $event);
+											"
 											hide-details
 											prepend-inner-icon="mdi-package-variant-closed"
 										>
 											<template v-slot:item="{ props, item }">
 												<v-list-item v-bind="props">
-													<v-list-item-title
-														v-html="item.raw.batch_no"
-													></v-list-item-title>
-													<v-list-item-subtitle
-														v-html="
+													<v-list-item-title>{{
+														item.raw.batch_no
+													}}</v-list-item-title>
+													<v-list-item-subtitle>
+														{{
 															`Available QTY  '${item.raw.batch_qty}' - Expiry Date ${item.raw.expiry_date}`
-														"
-													></v-list-item-subtitle>
+														}}
+													</v-list-item-subtitle>
 												</v-list-item>
 											</template>
 										</v-autocomplete>
+									</div>
+								</div>
+								<div
+									class="form-row batch-bundle-plan"
+									v-if="
+										(item.batch_bundle && item.batch_bundle.length) ||
+										item.batch_bundle_shortfall > 0
+									"
+								>
+									<div class="form-field full-width">
+										<div
+											v-if="item.batch_bundle && item.batch_bundle.length"
+											class="batch-bundle-title"
+										>
+											{{ __("Serial and Batch Bundle (FIFO)") }}
+										</div>
+										<v-table
+											v-if="item.batch_bundle && item.batch_bundle.length"
+											density="compact"
+										>
+											<thead>
+												<tr>
+													<th>{{ __("Batch No") }}</th>
+													<th class="text-right">{{ __("Qty from batch") }}</th>
+													<th class="text-right">{{ __("Batch available") }}</th>
+													<th>{{ __("Expiry Date") }}</th>
+												</tr>
+											</thead>
+											<tbody>
+												<tr v-for="b in item.batch_bundle" :key="b.batch_no">
+													<td>{{ b.batch_no }}</td>
+													<td class="text-right">{{ formatFloat(b.qty) }}</td>
+													<td class="text-right">
+														{{ formatFloat(b.available_qty) }}
+													</td>
+													<td>{{ b.expiry_date || "-" }}</td>
+												</tr>
+											</tbody>
+										</v-table>
+										<div
+											v-if="item.batch_bundle_shortfall > 0"
+											class="batch-bundle-short"
+										>
+											{{
+												__("Not enough stock across batches: {0} short", [
+													formatFloat(item.batch_bundle_shortfall),
+												])
+											}}
+										</div>
 									</div>
 								</div>
 							</div>
@@ -1399,6 +1464,16 @@ export default {
 	position: relative;
 }
 
+/* The details panel is the div inside a td, so the cell-centering rule
+   (.pos-table td > div) hit it too: once the 1000px cap the expand animation
+   leaves behind was reached, the form was centred in it and its top slid under
+   the item row. Lay it out as a plain block with no height cap. */
+.pos-table td.expanded-row-cell > .expanded-content {
+	display: block;
+	height: auto;
+	max-height: none !important;
+}
+
 /* Main expanded content container */
 .expanded-content {
 	padding: 24px;
@@ -1615,6 +1690,19 @@ export default {
 	text-transform: uppercase;
 	letter-spacing: 0.5px;
 	color: var(--pos-text-primary);
+}
+
+.batch-bundle-title {
+	font-weight: 600;
+	font-size: 0.85rem;
+	margin-bottom: 6px;
+	color: var(--pos-text-primary);
+}
+
+.batch-bundle-short {
+	margin-top: 6px;
+	font-size: 0.85rem;
+	color: rgb(var(--v-theme-error));
 }
 
 /* Form rows - flexible and responsive */
