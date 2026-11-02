@@ -2086,9 +2086,6 @@ export default {
 	_applyItemDetailPayload(item, data, options = {}) {
 		const { forceUpdate = false } = options;
 
-		if (!item.warehouse) {
-			item.warehouse = this.pos_profile.warehouse;
-		}
 		if (data.price_list_currency) {
 			this.price_list_currency = data.price_list_currency;
 		}
@@ -2122,7 +2119,10 @@ export default {
 		item.description = data.description;
 		item.item_tax_template = data.item_tax_template;
 		item.discount_percentage = data.discount_percentage;
-		item.warehouse = data.warehouse || item.warehouse;
+		// data.warehouse is the item's own default warehouse. Rows reach the server
+		// without one and are posted from the profile's, so keep the row on that;
+		// the item default sent later batch and stock lookups to the wrong store.
+		item.warehouse = this.pos_profile.warehouse;
 		item.has_batch_no = data.has_batch_no;
 		item.has_serial_no = data.has_serial_no;
 		item.serial_no = data.serial_no;
@@ -2131,7 +2131,6 @@ export default {
 		item.is_fixed_asset = data.is_fixed_asset;
 		item.allow_alternative_item = data.allow_alternative_item;
 		item.is_stock_item = data.is_stock_item;
-		item.warehouse = data.warehouse || item.warehouse;
 
 		item.actual_qty = data.actual_qty;
 		item.available_qty = data.actual_qty;
@@ -2641,7 +2640,10 @@ export default {
 		const token = (item._batchBundleToken || 0) + 1;
 		item._batchBundleToken = token;
 
-		const required = Math.abs(flt(item.stock_qty ?? flt(item.qty) * flt(item.conversion_factor || 1)));
+		// Later rows of the same item draw on what this row leaves, so re-plan them.
+		this._same_item_rows(item, "after").forEach((row) => this.update_batch_bundle_plan(row));
+
+		const required = this._row_stock_qty(item);
 		const isReturn = flt(item.qty) < 0 || this.invoiceType === "Return";
 		// A POS Invoice posts no stock on submit, so ERPNext builds it no bundle.
 		const posInvoice = !!this.pos_profile.create_pos_invoice_instead_of_sales_invoice;
@@ -2657,6 +2659,12 @@ export default {
 		await new Promise((resolve) => setTimeout(resolve, 250));
 		if (item._batchBundleToken !== token) return;
 
+		// Rows of one item are posted in order, each taking the oldest stock left,
+		// so this row's share starts after what the earlier auto-picked rows take.
+		const earlier = this._same_item_rows(item, "before")
+			.filter((row) => !row._batch_manual)
+			.reduce((sum, row) => sum + this._row_stock_qty(row), 0);
+
 		let plan;
 		try {
 			const r = await frappe.call({
@@ -2666,7 +2674,7 @@ export default {
 					// Rows go to the server without a warehouse and are posted from the
 					// profile's; item.warehouse can hold the item's default instead.
 					warehouse: this.pos_profile.warehouse,
-					qty: required,
+					qty: earlier + required,
 				},
 			});
 			plan = r && r.message;
@@ -2676,8 +2684,9 @@ export default {
 		}
 		if (item._batchBundleToken !== token || !plan) return;
 
-		const batches = plan.batches || [];
-		const shortfall = Math.max(0, flt(plan.required) - flt(plan.allocated));
+		const batches = this._skip_batch_qty(plan.batches || [], earlier);
+		const allocated = batches.reduce((sum, b) => sum + flt(b.qty), 0);
+		const shortfall = Math.max(0, required - allocated);
 		item.batch_bundle_shortfall = shortfall;
 
 		// One batch covers it: no bundle. All batches together fall short: ERPNext
@@ -2694,9 +2703,35 @@ export default {
 		}
 
 		item.batch_no = null;
-		item.actual_batch_qty = plan.allocated;
+		item.actual_batch_qty = allocated;
 		item.batch_no_expiry_date = null;
 		item.batch_bundle = batches;
+	},
+
+	_row_stock_qty(row) {
+		return Math.abs(flt(row.stock_qty ?? flt(row.qty) * flt(row.conversion_factor || 1)));
+	},
+
+	// Sale rows of the same item before or after `item` in the cart.
+	_same_item_rows(item, side) {
+		const rows = this.items || [];
+		const at = rows.indexOf(item);
+		return rows.filter((row, i) => {
+			if (row === item || row.item_code !== item.item_code || flt(row.qty) <= 0) return false;
+			return side === "before" ? i < at : i > at;
+		});
+	},
+
+	// Drop the first `qty` from a FIFO batch list (the part earlier rows take).
+	_skip_batch_qty(batches, qty) {
+		let skip = qty;
+		const out = [];
+		batches.forEach((b) => {
+			const taken = Math.min(skip, flt(b.qty));
+			skip -= taken;
+			if (flt(b.qty) - taken > 0) out.push({ ...b, qty: flt(b.qty) - taken });
+		});
+		return out;
 	},
 
 	_set_row_batch(item, batch) {

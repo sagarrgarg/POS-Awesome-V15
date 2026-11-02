@@ -31,10 +31,15 @@ export function useBatchSerial() {
 		);
 		const used_batches = {};
 		item.batch_no_data.forEach((batch) => {
+			// batch_no_data is written back below with other rows' qty taken off;
+			// start from the batch's full qty so repeat calls do not take it off again
+			const total = batch.total_batch_qty ?? batch.batch_qty;
 			used_batches[batch.batch_no] = {
 				...batch,
+				total_batch_qty: total,
+				batch_qty: total,
 				used_qty: 0,
-				remaining_qty: batch.batch_qty,
+				remaining_qty: total,
 			};
 			existing_items.forEach((element) => {
 				if (element.batch_no && element.batch_no == batch.batch_no) {

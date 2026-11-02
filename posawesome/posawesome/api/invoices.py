@@ -250,6 +250,41 @@ def _release_short_batches(invoice_doc):
 
 
 @frappe.whitelist()
+def get_last_invoice(pos_opening_shift):
+    """Return the latest bill the current user printed in their opening shift.
+
+    The POS kept the last bill only in page memory, so "Print Last Invoice" was
+    disabled after every reload. A bill submitted in a background job is still a
+    draft for a moment, so printed drafts count; cancelled bills do not.
+    """
+
+    shift = frappe.db.get_value("POS Opening Shift", pos_opening_shift, ["user", "pos_profile"], as_dict=True)
+    if not shift or shift.user != frappe.session.user:
+        return None
+
+    doctype = (
+        "POS Invoice"
+        if frappe.db.get_value(
+            "POS Profile", shift.pos_profile, "create_pos_invoice_instead_of_sales_invoice"
+        )
+        else "Sales Invoice"
+    )
+    last = frappe.get_all(
+        doctype,
+        filters={
+            "posa_pos_opening_shift": pos_opening_shift,
+            "owner": frappe.session.user,
+            "docstatus": ["<", 2],
+            "posa_is_printed": 1,
+        },
+        order_by="creation desc",
+        limit=1,
+        pluck="name",
+    )
+    return last[0] if last else None
+
+
+@frappe.whitelist()
 def validate_cart_items(items, pos_profile=None):
     """Validate cart items for available stock.
 

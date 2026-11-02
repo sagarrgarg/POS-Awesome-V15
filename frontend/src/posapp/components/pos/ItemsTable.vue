@@ -595,14 +595,14 @@
 										>
 											<template v-slot:item="{ props, item }">
 												<v-list-item v-bind="props">
-													<v-list-item-title
-														v-html="item.raw.batch_no"
-													></v-list-item-title>
-													<v-list-item-subtitle
-														v-html="
+													<v-list-item-title>{{
+														item.raw.batch_no
+													}}</v-list-item-title>
+													<v-list-item-subtitle>
+														{{
 															`Available QTY  '${item.raw.batch_qty}' - Expiry Date ${item.raw.expiry_date}`
-														"
-													></v-list-item-subtitle>
+														}}
+													</v-list-item-subtitle>
 												</v-list-item>
 											</template>
 										</v-autocomplete>
